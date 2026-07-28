@@ -1,0 +1,65 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: jd_rag_resume
+      MYSQL_USER: jd_app
+      MYSQL_PASSWORD: ${DB_PASSWORD:-jd_app_123456}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-resume_lens_root_local}
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./jd-rag-resume-backend
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/jd_rag_resume?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: jd_app
+      DB_PASSWORD: ${DB_PASSWORD:-jd_app_123456}
+      JWT_SECRET: ${JWT_SECRET:-resume-lens-compose-local-secret-change-me-2026}
+      AI_MOCK_ENABLED: ${AI_MOCK_ENABLED:-true}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - backend-data:/app/data
+      - backend-uploads:/app/uploads
+      - model-cache:/root/.cache
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./jd-rag-resume-frontend
+    environment:
+      BACKEND_API_URL: http://backend:8080
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  backend-data:
+  backend-uploads:
+  model-cache:

@@ -1,0 +1,940 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent } from "react";
+import { BackendStatus } from "./components/BackendStatus";
+import {
+  AUTH_EXPIRED_EVENT,
+  SAMPLE_BULK_JOBS,
+  type Analysis,
+  type AuthResponse,
+  type Job,
+  type PageData,
+  type Resume,
+  type User,
+  apiRequest,
+  logoutSession,
+  parseJobImportPayload,
+  refreshSession,
+  setAccessToken,
+} from "./lib/api";
+import {
+  asList,
+  buildReportMarkdown,
+  buildReportPrintHtml,
+  downloadTextFile,
+  evidenceChunks,
+  openPrintableReport,
+  parseRagMeta,
+  reportFilename,
+} from "./report-export";
+
+const EMPTY_RESUME_FORM = {
+  title: "",
+  candidateName: "",
+  phone: "",
+  email: "",
+  rawText: "",
+};
+const EMPTY_JOB_FORM = {
+  title: "",
+  companyName: "",
+  location: "",
+  employmentType: "全职",
+  description: "",
+  requirements: "",
+};
+
+function renderCitedText(text: string) {
+  const parts = text.split(/(\[chunk-\d+\])/g);
+  return parts.map((part, index) => {
+    const cite = part.match(/^\[chunk-(\d+)\]$/);
+    if (!cite) return <span key={index}>{part}</span>;
+    return (
+      <a key={index} className="cite" href={`#chunk-${cite[1]}`} onClick={(event) => {
+        event.preventDefault();
+        const target = document.getElementById(`chunk-${cite[1]}`);
+        if (target instanceof HTMLDetailsElement) {
+          target.open = true;
+          target.classList.add("highlight");
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          window.setTimeout(() => target.classList.remove("highlight"), 1400);
+        }
+      }}>
+        {part}
+      </a>
+    );
+  });
+}
+
+function scoreTone(score = 0) {
+  if (score >= 85) return "excellent";
+  if (score >= 70) return "good";
+  return "watch";
+}
+
+const SAMPLE_RESUME = {
+  title: "Java 后端开发简历",
+  candidateName: "张三",
+  phone: "13800000000",
+  email: "zhangsan@example.com",
+  rawText: `技能
+熟练掌握 Java、Spring Boot、MySQL、JWT 与 REST API 开发；有权限体系与全局异常处理实践。
+
+工作经历
+2023-2025 某互联网公司后端开发：维护招聘业务服务，设计简历/职位表结构，完成用户数据隔离；参与登录鉴权改造，引入 JWT。
+
+项目经历
+负责简历匹配系统中的 RAG 模块：文本分块、本地 Embedding、Top-K 召回与证据拼装，支持中英文；对接 DeepSeek Chat Completions，约束 JSON 输出。
+使用 Apache Tika 解析 PDF/DOCX 简历文本，并提供 rawText 校对入口。
+
+教育
+本科 · 计算机科学与技术 · 主修数据结构、操作系统、计算机网络。`,
+};
+
+const SAMPLE_JOB = {
+  title: "RAG 平台工程师",
+  companyName: "某科技",
+  location: "杭州",
+  employmentType: "全职",
+  description: "负责企业知识库与招聘场景的 RAG 链路建设，覆盖解析、分块、向量检索与生成式分析，和业务一起把匹配结果做得可解释。",
+  requirements: "Java / Spring Boot / MySQL；熟悉 Embedding、向量检索；有 JWT/权限与 API 设计经验；加分：DeepSeek/OpenAI 对接、简历解析。",
+};
+
+const PREVIEW_EVIDENCE = [
+  { index: 0, section: "技能", sim: 0.78, status: "进入 prompt", text: "熟练掌握 Java、Spring Boot、MySQL、JWT 与 REST API 开发；有权限体系与全局异常处理实践。", boost: "Java, Spring Boot" },
+  { index: 1, section: "项目", sim: 0.71, status: "进入 prompt", text: "负责简历匹配系统中的 RAG 模块：文本分块、本地 Embedding、Top-K 召回与证据拼装。", boost: "RAG, Embedding" },
+  { index: 2, section: "工作经历", sim: 0.63, status: "进入 prompt", text: "维护招聘业务服务，设计简历/职位表结构，完成用户数据隔离与 JWT 鉴权。", boost: "MySQL" },
+  { index: 5, section: "其他", sim: 0.21, status: "低于阈值", text: "兴趣爱好：篮球、摄影。与岗位核心要求相关度较低。", boost: "" },
+];
+
+export default function Home() {
+  const [token, setToken] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem("jd-rag-sidebar-collapsed") === "true",
+  );
+  const [user, setUser] = useState<User | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [auth, setAuth] = useState({ username: "", password: "", email: "", displayName: "" });
+  const [resumes, setResumes] = useState<Resume[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [history, setHistory] = useState<Analysis[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState<number | "">("");
+  const [selectedJobId, setSelectedJobId] = useState<number | "">("");
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [resumeForm, setResumeForm] = useState({ ...SAMPLE_RESUME });
+  const [jobForm, setJobForm] = useState({ ...SAMPLE_JOB });
+  const [editingResumeId, setEditingResumeId] = useState<number | null>(null);
+  const [editingJobId, setEditingJobId] = useState<number | null>(null);
+  const [bulkImportText, setBulkImportText] = useState(() => JSON.stringify(SAMPLE_BULK_JOBS, null, 2));
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [evidenceFilter, setEvidenceFilter] = useState<"kept" | "all" | "boost">("kept");
+
+  function clearAuthenticatedView() {
+    setToken("");
+    setUser(null);
+    setAnalysis(null);
+    setHistory([]);
+  }
+
+  async function waitForAnalysis(initial: Analysis) {
+    let current = initial;
+    setAnalysis(current);
+    setHistory((items) => [current, ...items.filter((item) => item.id !== current.id)]);
+
+    for (let attempt = 0; current.status === "PENDING" && attempt < 60; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      current = await apiRequest<Analysis>(`/api/analysis-histories/${current.id}`);
+      setAnalysis(current);
+      setHistory((items) => [current, ...items.filter((item) => item.id !== current.id)]);
+    }
+
+    if (current.status === "PENDING") throw new Error("分析仍在后台运行，请稍后重试");
+    if (current.status === "FAILED") throw new Error(current.summary || "AI 分析失败");
+    return current;
+  }
+
+  const loadWorkspace = useCallback(async () => {
+    setBusy("loading");
+    setError("");
+    try {
+      const [resumePage, jobPage, historyPage] = await Promise.all([
+        apiRequest<PageData<Resume>>("/api/resumes?size=50"),
+        apiRequest<PageData<Job>>("/api/job-descriptions?size=50"),
+        apiRequest<PageData<Analysis>>("/api/analysis-histories?size=20"),
+      ]);
+      setResumes(resumePage.content);
+      setJobs(jobPage.content);
+      setHistory(historyPage.content);
+      if (!selectedResumeId && resumePage.content[0]) setSelectedResumeId(resumePage.content[0].id);
+      if (!selectedJobId && jobPage.content[0]) setSelectedJobId(jobPage.content[0].id);
+      if (!analysis && historyPage.content[0]?.status === "COMPLETED") setAnalysis(historyPage.content[0]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法连接后端");
+    } finally {
+      setBusy("");
+    }
+  }, [analysis, selectedJobId, selectedResumeId]);
+
+  useEffect(() => {
+    const locationTimer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const resumeIdParam = Number(params.get("resumeId"));
+      const jobIdParam = Number(params.get("jobId"));
+      if (Number.isFinite(resumeIdParam) && resumeIdParam > 0) setSelectedResumeId(resumeIdParam);
+      if (Number.isFinite(jobIdParam) && jobIdParam > 0) setSelectedJobId(jobIdParam);
+    }, 0);
+
+    const handleAuthExpired = () => {
+      clearAuthenticatedView();
+      setError("登录已过期，请重新登录");
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    void refreshSession().then(async (session) => {
+      if (!session) return;
+      setToken(session.accessToken);
+      setUser(session.user);
+      await loadWorkspace();
+    });
+    return () => {
+      window.clearTimeout(locationTimer);
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function submitAuth(event: FormEvent) {
+    event.preventDefault();
+    setBusy("auth");
+    setError("");
+    try {
+      const path = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const body = authMode === "login"
+        ? { username: auth.username, password: auth.password }
+        : auth;
+      const result = await apiRequest<AuthResponse>(
+        path,
+        { method: "POST", body: JSON.stringify(body) },
+        { auth: false },
+      );
+      setAccessToken(result.accessToken);
+      setToken(result.accessToken);
+      setUser(result.user);
+      setNotice(`欢迎回来，${result.user.displayName}`);
+      await loadWorkspace();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "登录失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function logout() {
+    void logoutSession();
+    clearAuthenticatedView();
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => {
+      localStorage.setItem("jd-rag-sidebar-collapsed", String(!current));
+      return !current;
+    });
+  }
+
+  async function chooseFile(event: ChangeEvent<HTMLInputElement>) {
+    const nextFile = event.target.files?.[0] || null;
+    setFile(nextFile);
+    if (!nextFile) return;
+    setResumeForm((current) => ({ ...current, title: current.title || nextFile.name.replace(/\.[^.]+$/, "") }));
+    if (/\.(txt|md)$/i.test(nextFile.name)) {
+      const text = await nextFile.text();
+      setResumeForm((current) => ({ ...current, rawText: text }));
+    }
+  }
+
+  function beginEditResume(item: Resume) {
+    setEditingResumeId(item.id);
+    setFile(null);
+    setResumeForm({
+      title: item.title || "",
+      candidateName: item.candidateName || "",
+      phone: item.phone || "",
+      email: item.email || "",
+      rawText: item.rawText || "",
+    });
+    setSelectedResumeId(item.id);
+    setNotice(`正在编辑简历 #${item.id}，保存后将更新并失效旧向量索引`);
+  }
+
+  function beginEditJob(item: Job) {
+    setEditingJobId(item.id);
+    setJobForm({
+      title: item.title || "",
+      companyName: item.companyName || "",
+      location: item.location || "",
+      employmentType: item.employmentType || "全职",
+      description: item.description || "",
+      requirements: item.requirements || "",
+    });
+    setSelectedJobId(item.id);
+    setNotice(`正在编辑职位 #${item.id}`);
+  }
+
+  function resetResumeEditor() {
+    setEditingResumeId(null);
+    setFile(null);
+    setResumeForm({ ...EMPTY_RESUME_FORM });
+  }
+
+  function resetJobEditor() {
+    setEditingJobId(null);
+    setJobForm({ ...EMPTY_JOB_FORM });
+  }
+
+  async function saveResume(event: FormEvent) {
+    event.preventDefault();
+    setBusy("resume");
+    setError("");
+    try {
+      let saved: Resume;
+      if (editingResumeId && file) {
+        throw new Error("编辑模式下不支持重新上传文件；请先取消编辑，或清空文件后仅更新文本");
+      }
+      if (editingResumeId) {
+        saved = await apiRequest<Resume>(`/api/resumes/${editingResumeId}`, {
+          method: "PUT",
+          body: JSON.stringify(resumeForm),
+        });
+        setResumes((items) => items.map((item) => (item.id === saved.id ? saved : item)));
+        setNotice(`简历 #${saved.id} 已更新，下次匹配会重建向量`);
+      } else if (file) {
+        const form = new FormData();
+        form.append("file", file);
+        Object.entries(resumeForm).forEach(([key, value]) => value && form.append(key, value));
+        saved = await apiRequest<Resume>("/api/resumes/upload", { method: "POST", body: form });
+        setResumes((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+        setNotice("简历已上传保存，等待向量检索");
+      } else {
+        saved = await apiRequest<Resume>("/api/resumes", { method: "POST", body: JSON.stringify(resumeForm) });
+        setResumes((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+        setNotice("简历已保存，等待向量检索");
+      }
+      setSelectedResumeId(saved.id);
+      setEditingResumeId(null);
+      setFile(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "简历保存失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveJob(event: FormEvent) {
+    event.preventDefault();
+    setBusy("job");
+    setError("");
+    try {
+      let saved: Job;
+      if (editingJobId) {
+        saved = await apiRequest<Job>(`/api/job-descriptions/${editingJobId}`, {
+          method: "PUT",
+          body: JSON.stringify(jobForm),
+        });
+        setJobs((items) => items.map((item) => (item.id === saved.id ? saved : item)));
+        setNotice(`职位 #${saved.id} 已更新`);
+      } else {
+        saved = await apiRequest<Job>("/api/job-descriptions", { method: "POST", body: JSON.stringify(jobForm) });
+        setJobs((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+        setNotice("职位 JD 已保存，可以开始匹配");
+      }
+      setSelectedJobId(saved.id);
+      setEditingJobId(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "JD 保存失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteResume(id: number) {
+    if (!window.confirm(`确认删除简历 #${id}？将同时清理上传文件与向量索引。`)) return;
+    setBusy("resume-delete");
+    setError("");
+    try {
+      await apiRequest<void>(`/api/resumes/${id}`, { method: "DELETE" });
+      setResumes((items) => items.filter((item) => item.id !== id));
+      if (selectedResumeId === id) setSelectedResumeId("");
+      if (editingResumeId === id) resetResumeEditor();
+      if (analysis?.resumeId === id) setAnalysis(null);
+      setNotice(`简历 #${id} 已删除`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "删除简历失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteJob(id: number) {
+    if (!window.confirm(`确认删除职位 #${id}？`)) return;
+    setBusy("job-delete");
+    setError("");
+    try {
+      await apiRequest<void>(`/api/job-descriptions/${id}`, { method: "DELETE" });
+      setJobs((items) => items.filter((item) => item.id !== id));
+      if (selectedJobId === id) setSelectedJobId("");
+      if (editingJobId === id) resetJobEditor();
+      if (analysis?.jobDescriptionId === id) setAnalysis(null);
+      setNotice(`职位 #${id} 已删除`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "删除职位失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function bulkImportJobs() {
+    setBusy("bulk-import");
+    setError("");
+    try {
+      const items = parseJobImportPayload(bulkImportText);
+      const imported = await apiRequest<Job[]>("/api/job-descriptions/import", {
+        method: "POST",
+        body: JSON.stringify({ items }),
+      });
+      setJobs((current) => {
+        const merged = [...imported, ...current];
+        const seen = new Set<number>();
+        return merged.filter((item) => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+      });
+      if (imported[0]) setSelectedJobId(imported[0].id);
+      setShowBulkImport(false);
+      setNotice(`已批量导入 ${imported.length} 条职位（POST /api/job-descriptions/import）`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "批量导入失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function fillSampleForms() {
+    setFile(null);
+    setEditingResumeId(null);
+    setEditingJobId(null);
+    setResumeForm({ ...SAMPLE_RESUME });
+    setJobForm({ ...SAMPLE_JOB });
+    setNotice("已填入示例简历与 JD，保存后即可在第 03 步选择并匹配");
+  }
+
+  function exportMarkdown() {
+    if (!analysis || analysis.status !== "COMPLETED") {
+      setError("请先完成一次匹配分析，再导出报告");
+      return;
+    }
+    try {
+      const markdown = buildReportMarkdown(analysis);
+      downloadTextFile(reportFilename(analysis, "md"), markdown, "text/markdown;charset=utf-8");
+      setNotice("已下载 Markdown 报告");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "导出 Markdown 失败");
+    }
+  }
+
+  function exportPdf() {
+    if (!analysis || analysis.status !== "COMPLETED") {
+      setError("请先完成一次匹配分析，再导出报告");
+      return;
+    }
+    try {
+      openPrintableReport(buildReportPrintHtml(analysis));
+      setNotice("已打开打印预览：请选择「另存为 PDF」");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "导出 PDF 失败");
+    }
+  }
+
+  async function saveSampleAndAnalyze() {
+    setBusy("sample");
+    setError("");
+    try {
+      setEditingResumeId(null);
+      setEditingJobId(null);
+      setFile(null);
+      setResumeForm({ ...SAMPLE_RESUME });
+      setJobForm({ ...SAMPLE_JOB });
+      const createdResume = await apiRequest<Resume>("/api/resumes", {
+        method: "POST",
+        body: JSON.stringify(SAMPLE_RESUME),
+      });
+      const createdJob = await apiRequest<Job>("/api/job-descriptions", {
+        method: "POST",
+        body: JSON.stringify(SAMPLE_JOB),
+      });
+      setResumes((items) => [createdResume, ...items.filter((item) => item.id !== createdResume.id)]);
+      setJobs((items) => [createdJob, ...items.filter((item) => item.id !== createdJob.id)]);
+      setSelectedResumeId(createdResume.id);
+      setSelectedJobId(createdJob.id);
+      setNotice("示例数据已保存，正在启动 Hybrid RAG 分析…");
+      setBusy("analysis");
+      const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
+        method: "POST",
+        body: JSON.stringify({ resumeId: createdResume.id, jobDescriptionId: createdJob.id }),
+      });
+      await waitForAnalysis(result);
+      setNotice("示例匹配完成，下方报告已更新");
+      requestAnimationFrame(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "示例流程失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runAnalysis() {
+    if (!selectedResumeId || !selectedJobId) {
+      setError("请先选择简历和职位 JD，或点「一键示例匹配」");
+      return;
+    }
+    setBusy("analysis");
+    setError("");
+    setNotice("Hybrid RAG 正在检索（阈值过滤 + 关键词 boost），DeepSeek 正在生成分析…");
+    try {
+      const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
+        method: "POST",
+        body: JSON.stringify({ resumeId: selectedResumeId, jobDescriptionId: selectedJobId }),
+      });
+      await waitForAnalysis(result);
+      setNotice("分析完成，结果已写入 MySQL");
+      requestAnimationFrame(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "AI 分析失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const strengths = useMemo(() => asList(analysis?.strengths), [analysis]);
+  const missing = useMemo(() => asList(analysis?.missingSkills), [analysis]);
+  const suggestions = useMemo(() => asList(analysis?.improvementSuggestions), [analysis]);
+  const questions = useMemo(() => asList(analysis?.interviewQuestions), [analysis]);
+  const evidence = useMemo(() => evidenceChunks(analysis?.retrievedContext), [analysis]);
+  const ragMeta = useMemo(() => parseRagMeta(analysis?.retrievedContext), [analysis]);
+  const visibleEvidence = useMemo(() => {
+    if (evidenceFilter === "all") return evidence;
+    if (evidenceFilter === "boost") return evidence.filter((item) => item.boost && item.boost !== "-");
+    return evidence.filter((item) => item.kept);
+  }, [evidence, evidenceFilter]);
+  const keptEvidence = useMemo(() => evidence.filter((item) => item.kept), [evidence]);
+  const parsedScore = Number(analysis?.matchScore);
+  const score = Number.isFinite(parsedScore) ? parsedScore : 0;
+  const analysisPending = analysis?.status === "PENDING";
+  const keptCount = ragMeta?.kept ?? keptEvidence.length;
+  const averageSimilarity = ragMeta?.avgSimilarity ?? (keptEvidence[0]?.similarity || 0);
+  const evidenceConfidence = keptCount === 0 ? "低" : averageSimilarity >= 0.8 || keptCount >= 4 ? "高" : averageSimilarity >= 0.65 || keptCount >= 2 ? "中" : "低";
+
+  if (!token) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-story">
+          <div className="brand"><span className="brand-mark">R</span><span>ResumeLens</span></div>
+          <div className="eyebrow">RAG · RESUME INTELLIGENCE</div>
+          <h1>让每一段经历，<br />都对准理想职位。</h1>
+          <p>阿里 GTE 本地检索简历证据，DeepSeek 输出可解释的匹配分析。不是关键词打分，而是一条完整的 RAG 链路。</p>
+          <div className="auth-metrics">
+            <div><strong>768</strong><span>向量维度</span></div>
+            <div><strong>Top-K</strong><span>证据召回</span></div>
+            <div><strong>MySQL</strong><span>结果持久化</span></div>
+          </div>
+          <div className="story-orbit story-orbit-one" />
+          <div className="story-orbit story-orbit-two" />
+        </section>
+        <section className="auth-panel">
+          <form className="auth-card" onSubmit={submitAuth}>
+            <div className="mobile-brand"><span className="brand-mark">R</span> ResumeLens</div>
+            <BackendStatus variant="pill" />
+            <h2>{authMode === "login" ? "登录工作台" : "创建演示账号"}</h2>
+            <p>{authMode === "login" ? "继续你的简历匹配分析" : "30 秒建立自己的分析空间"}</p>
+            <label>用户名<input required maxLength={64} value={auth.username} onChange={(e) => setAuth({ ...auth, username: e.target.value })} placeholder="输入用户名" /></label>
+            {authMode === "register" && <>
+              <label>显示名称<input required maxLength={80} value={auth.displayName} onChange={(e) => setAuth({ ...auth, displayName: e.target.value })} placeholder="例如 Arthur" /></label>
+              <label>邮箱<input required type="email" value={auth.email} onChange={(e) => setAuth({ ...auth, email: e.target.value })} placeholder="name@example.com" /></label>
+            </>}
+            <label>密码<input required type="password" minLength={6} value={auth.password} onChange={(e) => setAuth({ ...auth, password: e.target.value })} placeholder="至少 6 位" /></label>
+            {error && <div className="message error">{error}</div>}
+            <button className="primary full" disabled={busy === "auth"}>{busy === "auth" ? "正在连接…" : authMode === "login" ? "进入工作台" : "注册并进入"}<span>→</span></button>
+            <button className="text-button" type="button" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(""); }}>
+              {authMode === "login" ? "没有账号？创建一个" : "已有账号？直接登录"}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark">R</span><span>ResumeLens</span></div>
+        <button className="sidebar-toggle" onClick={toggleSidebar} title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}>‹</button>
+        <nav>
+          <a className="active" href="#workflow"><span>⌁</span><b>智能匹配</b></a>
+          <a href="#result"><span>◎</span><b>分析报告</b></a>
+          <a href="#history"><span>↺</span><b>历史记录</b></a>
+        </nav>
+        <div className="model-card">
+          <span>当前模型组合</span>
+          <strong>Alibaba GTE</strong>
+          <small>CLS pooling · Hybrid RAG</small>
+          <BackendStatus variant="model" />
+        </div>
+        <div className="user-card">
+          <span className="avatar">{(user?.displayName || user?.username || "A").slice(0, 1).toUpperCase()}</span>
+          <div><strong>{user?.displayName || user?.username}</strong><small>{user?.email}</small></div>
+          <button onClick={logout} title="退出登录">↗</button>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        <header className="topbar">
+          <div><span className="eyebrow">AI RECRUITMENT COPILOT · V2</span><h1>简历 · 职位智能匹配</h1></div>
+          <div className="top-actions">
+            <BackendStatus />
+            <button className="ghost" type="button" onClick={fillSampleForms}>填入示例</button>
+            <button className="ghost accent" type="button" disabled={!!busy} onClick={() => void saveSampleAndAnalyze()}>
+              {busy === "sample" || busy === "analysis" ? "示例匹配中…" : "一键示例匹配"}
+            </button>
+            <button className="ghost" type="button" onClick={() => void loadWorkspace()}>刷新数据</button>
+          </div>
+        </header>
+
+        <div className="overview-strip">
+          <div className="overview-card"><span>已存简历</span><strong>{resumes.length}</strong><small>可在第 03 步选择</small></div>
+          <div className="overview-card"><span>已存职位</span><strong>{jobs.length}</strong><small>JD 双 Query 检索</small></div>
+          <div className="overview-card"><span>分析记录</span><strong>{history.length}</strong><small>含证据链落库</small></div>
+          <div className="overview-card hot"><span>检索策略</span><strong>CLS · Hybrid</strong><small>minSim 0.55 · Top-K 5</small></div>
+        </div>
+
+        {(error || notice) && <div className={`toast ${error ? "error" : "success"}`}><span>{error ? "!" : "✓"}</span>{error || notice}<button onClick={() => { setError(""); setNotice(""); }}>×</button></div>}
+
+        <section className="workflow" id="workflow">
+          <div className="section-heading">
+            <div><span>01—03</span><h2>建立匹配任务</h2></div>
+            <p>表单已预填示例内容，可直接保存，或点右上角「一键示例匹配」。</p>
+          </div>
+          <div className="step-grid">
+            <form className="step-card" onSubmit={saveResume}>
+              <div className="step-title">
+                <span>01</span>
+                <div>
+                  <h3>{editingResumeId ? `编辑简历 #${editingResumeId}` : "添加简历"}</h3>
+                  <p>{editingResumeId ? "修改文本后保存 · PUT /api/resumes/{id}" : "上传文件或粘贴原文"}</p>
+                </div>
+              </div>
+              <label className={`file-drop ${editingResumeId ? "disabled-drop" : ""}`}>
+                <input type="file" accept=".pdf,.doc,.docx,.txt,.md" onChange={chooseFile} disabled={!!editingResumeId} />
+                <span className="upload-icon">↑</span>
+                <strong>{editingResumeId ? "编辑模式仅支持更新文本" : file ? file.name : "拖入简历文件（可选）"}</strong>
+                <small>PDF · DOCX · TXT，最大 20MB</small>
+              </label>
+              <div className="field-row"><label>简历标题<input required value={resumeForm.title} onChange={(e) => setResumeForm({ ...resumeForm, title: e.target.value })} placeholder="Java 后端开发简历" /></label><label>候选人<input required value={resumeForm.candidateName} onChange={(e) => setResumeForm({ ...resumeForm, candidateName: e.target.value })} placeholder="姓名" /></label></div>
+              <div className="field-row"><label>手机<input value={resumeForm.phone} onChange={(e) => setResumeForm({ ...resumeForm, phone: e.target.value })} placeholder="可选" /></label><label>邮箱<input type="email" value={resumeForm.email} onChange={(e) => setResumeForm({ ...resumeForm, email: e.target.value })} placeholder="可选" /></label></div>
+              <label>简历文本<textarea required={!file || !!editingResumeId} rows={8} value={resumeForm.rawText} onChange={(e) => setResumeForm({ ...resumeForm, rawText: e.target.value })} placeholder="可直接粘贴简历正文；上传 PDF / DOCX 时可留空" /></label>
+              <div className="form-actions">
+                <button className="secondary" disabled={busy === "resume"}>{busy === "resume" ? "保存中…" : editingResumeId ? "更新简历" : "保存简历"}</button>
+                {editingResumeId && (
+                  <button className="ghost" type="button" onClick={resetResumeEditor}>取消编辑</button>
+                )}
+              </div>
+              <div className="entity-library">
+                <div className="entity-library-head"><span>已存简历</span><em>{resumes.length}</em></div>
+                {resumes.length === 0 ? (
+                  <p className="entity-empty">暂无简历，保存后会出现在这里</p>
+                ) : resumes.map((item) => (
+                  <div className={`entity-row ${selectedResumeId === item.id ? "selected" : ""} ${editingResumeId === item.id ? "editing" : ""}`} key={item.id}>
+                    <button type="button" className="entity-main" onClick={() => setSelectedResumeId(item.id)} title="选为匹配简历">
+                      <strong>#{item.id} · {item.title}</strong>
+                      <small>{item.candidateName}{item.originalFileName ? ` · ${item.originalFileName}` : ""}</small>
+                    </button>
+                    <div className="entity-actions">
+                      <Link className="ghost compact" href={`/resumes/${item.id}`}>详情</Link>
+                      <button type="button" className="ghost compact" onClick={() => beginEditResume(item)} disabled={!!busy}>编辑</button>
+                      <button type="button" className="ghost compact danger" onClick={() => void deleteResume(item.id)} disabled={!!busy}>删除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </form>
+
+            <form className="step-card" onSubmit={saveJob}>
+              <div className="step-title">
+                <span>02</span>
+                <div>
+                  <h3>{editingJobId ? `编辑职位 #${editingJobId}` : "录入职位 JD"}</h3>
+                  <p>{editingJobId ? "修改后保存 · PUT /api/job-descriptions/{id}" : "告诉 AI 目标岗位要求"}</p>
+                </div>
+              </div>
+              <div className="field-row"><label>职位名称<input required value={jobForm.title} onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })} placeholder="Java RAG 工程师" /></label><label>公司名称<input required value={jobForm.companyName} onChange={(e) => setJobForm({ ...jobForm, companyName: e.target.value })} placeholder="公司" /></label></div>
+              <div className="field-row"><label>工作地点<input value={jobForm.location} onChange={(e) => setJobForm({ ...jobForm, location: e.target.value })} placeholder="杭州" /></label><label>用工类型<input value={jobForm.employmentType} onChange={(e) => setJobForm({ ...jobForm, employmentType: e.target.value })} /></label></div>
+              <label>岗位描述<textarea required rows={4} value={jobForm.description} onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })} placeholder="岗位职责、业务方向…" /></label>
+              <label>任职要求<textarea rows={4} value={jobForm.requirements} onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })} placeholder="技术栈、经验要求…" /></label>
+              <div className="form-actions">
+                <button className="secondary" disabled={busy === "job"}>{busy === "job" ? "保存中…" : editingJobId ? "更新职位" : "保存职位"}</button>
+                {editingJobId && (
+                  <button className="ghost" type="button" onClick={resetJobEditor}>取消编辑</button>
+                )}
+                <button className="ghost" type="button" onClick={() => setShowBulkImport((v) => !v)} disabled={!!busy}>
+                  {showBulkImport ? "收起批量导入" : "批量导入"}
+                </button>
+              </div>
+              {showBulkImport && (
+                <div className="bulk-import-panel">
+                  <div className="bulk-import-head">
+                    <strong>批量导入 JD</strong>
+                    <small>调用 POST /api/job-descriptions/import · 支持 JSON 数组 / {"{ items }"} / NDJSON</small>
+                  </div>
+                  <textarea
+                    rows={8}
+                    value={bulkImportText}
+                    onChange={(e) => setBulkImportText(e.target.value)}
+                    placeholder='[{"title":"...","companyName":"...","description":"..."}]'
+                  />
+                  <div className="form-actions">
+                    <button className="secondary" type="button" disabled={busy === "bulk-import"} onClick={() => void bulkImportJobs()}>
+                      {busy === "bulk-import" ? "导入中…" : "确认导入"}
+                    </button>
+                    <button className="ghost" type="button" onClick={() => setBulkImportText(JSON.stringify(SAMPLE_BULK_JOBS, null, 2))}>
+                      填入示例 JSON
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="entity-library">
+                <div className="entity-library-head"><span>已存职位</span><em>{jobs.length}</em></div>
+                {jobs.length === 0 ? (
+                  <p className="entity-empty">暂无职位，保存后会出现在这里</p>
+                ) : jobs.map((item) => (
+                  <div className={`entity-row ${selectedJobId === item.id ? "selected" : ""} ${editingJobId === item.id ? "editing" : ""}`} key={item.id}>
+                    <button type="button" className="entity-main" onClick={() => setSelectedJobId(item.id)} title="选为匹配职位">
+                      <strong>#{item.id} · {item.title}</strong>
+                      <small>{item.companyName}{item.location ? ` · ${item.location}` : ""}</small>
+                    </button>
+                    <div className="entity-actions">
+                      <Link className="ghost compact" href={`/jobs/${item.id}`}>详情</Link>
+                      <button type="button" className="ghost compact" onClick={() => beginEditJob(item)} disabled={!!busy}>编辑</button>
+                      <button type="button" className="ghost compact danger" onClick={() => void deleteJob(item.id)} disabled={!!busy}>删除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </form>
+
+            <div className="step-card analyze-card">
+              <div className="step-title"><span>03</span><div><h3>启动 AI 匹配</h3><p>选择数据并生成解释报告</p></div></div>
+              <label>选择简历<select value={selectedResumeId} onChange={(e) => setSelectedResumeId(Number(e.target.value))}><option value="">请选择（先保存简历）</option>{resumes.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.candidateName}</option>)}</select></label>
+              <label>选择职位<select value={selectedJobId} onChange={(e) => setSelectedJobId(Number(e.target.value))}><option value="">请选择（先保存职位）</option>{jobs.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.companyName}</option>)}</select></label>
+              <div className="rag-hint">
+                <span className="badge-new">V2</span>
+                <div>
+                  <strong>改进检索默认开启</strong>
+                  <p>GTE CLS 池化 · minSimilarity=0.55 · Top-K=5 · Hybrid + 双 Query · [chunk-N] 引用</p>
+                </div>
+              </div>
+              <div className="pipeline">
+                <div><i>1</i><span>文本分块<small>≈900 字</small></span></div>
+                <b>→</b><div><i>2</i><span>CLS 向量<small>GTE 8192</small></span></div>
+                <b>→</b><div><i>3</i><span>混合召回<small>阈值 · Top-K</small></span></div>
+                <b>→</b><div><i>4</i><span>生成分析<small>DeepSeek</small></span></div>
+              </div>
+              <div className="analyze-actions">
+                <button className="primary analyze" type="button" onClick={runAnalysis} disabled={busy === "analysis" || !selectedResumeId || !selectedJobId}>
+                  {busy === "analysis" ? <><i className="spinner" /> AI 正在分析…</> : <>开始智能匹配 <span>↗</span></>}
+                </button>
+                <button className="secondary outline" type="button" disabled={!!busy} onClick={() => void saveSampleAndAnalyze()}>
+                  没有数据？一键示例匹配
+                </button>
+              </div>
+              <small className="privacy-note">简历向量在本地生成，API Key 不会进入前端。示例匹配会写入你的账号数据。</small>
+            </div>
+          </div>
+        </section>
+
+        <section className="results" id="result">
+          <div className="section-heading">
+            <div><span>REPORT</span><h2>匹配分析报告</h2></div>
+            <div className="section-heading-actions">
+              <p>{analysis ? `报告 #${analysis.id} · ${new Date(analysis.createdAt).toLocaleString("zh-CN")}` : "下方为版式预览，运行分析后会替换成真实结果"}</p>
+              {analysis?.status === "COMPLETED" && (
+                <div className="export-actions">
+                  <button className="ghost" type="button" onClick={exportMarkdown}>导出 Markdown</button>
+                  <button className="ghost accent" type="button" onClick={exportPdf}>导出 PDF</button>
+                </div>
+              )}
+            </div>
+          </div>
+          {!analysis ? (
+            <div className="report-preview">
+              <div className="preview-banner">
+                <span className="badge-new">PREVIEW</span>
+                <div>
+                  <strong>报告区预览（非真实结果）</strong>
+                  <p>点右上角「一键示例匹配」，或先保存 01/02 再在 03 开始分析，这里会换成真实分数与证据。</p>
+                </div>
+                <button className="primary" type="button" disabled={!!busy} onClick={() => void saveSampleAndAnalyze()}>
+                  {busy ? "处理中…" : "生成真实报告"}
+                </button>
+              </div>
+              <div className="result-hero muted-hero">
+                <div className="score-ring good" style={{ "--score": "295deg" } as CSSProperties}><div><strong>82</strong><span>匹配分</span></div></div>
+                <div className="result-summary">
+                  <span className="rating">示例 · 高度匹配</span>
+                  <h3>Java 后端开发简历 <b>×</b> RAG 平台工程师</h3>
+                  <p>基于过阈证据，候选人在 Java 后端与 RAG 工程化方面匹配较好。低相关兴趣片段会被阈值过滤，结论可追溯到证据链。</p>
+                  <div className="result-stats">
+                    <span><strong>3</strong> 个有效证据</span>
+                    <span><strong>1</strong> 个已过滤</span>
+                    <span><strong>768</strong> 维向量</span>
+                    <span><strong>Hybrid</strong> 检索</span>
+                  </div>
+                </div>
+              </div>
+              <div className="diag-strip">
+                <div className="diag good"><div className="k">证据可信度</div><div className="v">高</div><div className="s">3 条进入 prompt</div></div>
+                <div className="diag blue"><div className="k">平均相似度</div><div className="v">0.71</div><div className="s">仅统计保留块</div></div>
+                <div className="diag"><div className="k">阈值 / Top-K</div><div className="v" style={{ fontSize: 13 }}>0.55 · K=5</div><div className="s">弱相关块会被过滤</div></div>
+                <div className="diag warn"><div className="k">池化策略</div><div className="v" style={{ fontSize: 13 }}>CLS</div><div className="s">first token · max 8192</div></div>
+              </div>
+              <div className="insight-grid">
+                <article className="insight strength"><header><span>✓</span><div><h3>核心优势</h3><p>可追溯 chunk</p></div></header><ul><li>Java / Spring Boot / MySQL 与 JD 对齐 <span className="cite">[chunk-0]</span></li><li>有 RAG 检索链路落地经验 <span className="cite">[chunk-1]</span></li><li>熟悉 JWT 与数据隔离 <span className="cite">[chunk-2]</span></li></ul></article>
+                <article className="insight gap"><header><span>△</span><div><h3>能力缺口</h3><p>证据未充分覆盖</p></div></header><ul><li>高并发调优指标描述不足</li><li>自动化测试 / CI 证据偏少</li><li>向量库运维经验未体现</li></ul></article>
+                <article className="insight improve"><header><span>↗</span><div><h3>优化建议</h3><p>让简历更靠近岗位</p></div></header><ul><li>补充召回率/延迟等量化结果</li><li>写明向量存储与重建策略</li><li>增加发布流水线描述</li></ul></article>
+              </div>
+              <article className="evidence-panel">
+                <header>
+                  <div><span>RAG EVIDENCE</span><h3>检索证据链（示例）</h3></div>
+                  <p>真实分析后，这里会显示简历原文分块与相似度。</p>
+                </header>
+                <div className="evidence-list preview-evidence">
+                  {PREVIEW_EVIDENCE.map((item) => (
+                    <details key={item.index} open={item.index < 2} className={item.status === "进入 prompt" ? "" : "filtered"}>
+                      <summary>
+                        <span>CHUNK {String(item.index).padStart(2, "0")}</span>
+                        <em className="meta-chip section">{item.section}</em>
+                        {item.boost && <em className="meta-chip boost">boost · {item.boost}</em>}
+                        <em className={`meta-chip ${item.status === "进入 prompt" ? "kept" : "drop"}`}>{item.status}</em>
+                        <strong className={item.sim >= 0.6 ? "" : item.sim >= 0.4 ? "mid" : "low"}>相似度 {(item.sim * 100).toFixed(1)}%</strong>
+                        <i>⌄</i>
+                      </summary>
+                      <p>{item.text}</p>
+                    </details>
+                  ))}
+                </div>
+              </article>
+            </div>
+          ) : <>
+            <div className="result-hero">
+              <div className={`score-ring ${scoreTone(score)}`} style={{ "--score": `${score * 3.6}deg` } as CSSProperties}><div><strong>{analysisPending ? "…" : score.toFixed(0)}</strong><span>{analysisPending ? "分析中" : "匹配分"}</span></div></div>
+              <div className="result-summary">
+                <span className={`rating ${scoreTone(score)}`}>{analysisPending ? "正在生成报告" : score >= 85 ? "高度匹配" : score >= 70 ? "值得尝试" : "需要优化"}</span>
+                <h3>{analysis.resumeTitle} <b>×</b> {analysis.jobTitle}</h3>
+                <p>{analysisPending ? "本地检索与 DeepSeek 分析正在进行，完成后会自动更新。" : analysis.summary || "已结合检索证据完成岗位匹配分析。"}</p>
+                <div className="result-stats">
+                  <span><strong>{ragMeta?.kept ?? keptEvidence.length}</strong> 个有效证据</span>
+                  <span><strong>{ragMeta?.filtered ?? Math.max(0, evidence.length - keptEvidence.length)}</strong> 个已过滤</span>
+                  <span><strong>768</strong> 维向量</span>
+                  <span><strong>{ragMeta?.hybrid === false ? "语义" : "Hybrid"}</strong> 检索</span>
+                </div>
+              </div>
+            </div>
+            <div className="diag-strip">
+              <div className="diag good">
+                <div className="k">证据可信度</div>
+                <div className="v">{evidenceConfidence}</div>
+                <div className="s">{keptCount} 条进入 prompt</div>
+              </div>
+              <div className="diag blue">
+                <div className="k">平均相似度</div>
+                <div className="v">{averageSimilarity.toFixed(2)}</div>
+                <div className="s">仅统计保留块</div>
+              </div>
+              <div className="diag">
+                <div className="k">阈值 / Top-K</div>
+                <div className="v" style={{ fontSize: 13 }}>{(ragMeta?.minSimilarity ?? 0.55).toFixed(2)} · K={ragMeta?.topK ?? 5}</div>
+                <div className="s">弱相关块会被过滤</div>
+              </div>
+              <div className="diag warn">
+                <div className="k">池化策略</div>
+                <div className="v" style={{ fontSize: 13 }}>CLS</div>
+                <div className="s">first token · max 8192</div>
+              </div>
+            </div>
+            <div className="insight-grid">
+              <article className="insight strength"><header><span>✓</span><div><h3>核心优势</h3><p>尽量带 [chunk-N] 引用</p></div></header><ul>{strengths.length ? strengths.map((item, index) => <li key={index}>{renderCitedText(item)}</li>) : <li>暂无明确优势</li>}</ul></article>
+              <article className="insight gap"><header><span>△</span><div><h3>能力缺口</h3><p>简历中尚未充分体现</p></div></header><ul>{missing.length ? missing.map((item, index) => <li key={index}>{item}</li>) : <li>未发现明显技能缺口</li>}</ul></article>
+              <article className="insight improve"><header><span>↗</span><div><h3>优化建议</h3><p>让简历更靠近目标职位</p></div></header><ul>{suggestions.length ? suggestions.map((item, index) => <li key={index}>{item}</li>) : <li>当前简历信息较完整</li>}</ul></article>
+            </div>
+            {questions.length > 0 && <article className="questions"><div><span>INTERVIEW KIT</span><h3>建议准备的面试问题</h3></div><ol>{questions.map((item, index) => <li key={index}><b>{String(index + 1).padStart(2, "0")}</b>{item}</li>)}</ol></article>}
+            <article className="evidence-panel">
+              <header>
+                <div><span>RAG EVIDENCE</span><h3>检索证据链</h3></div>
+                <p>DeepSeek 主要基于「进入 prompt」的证据生成；可切换查看被过滤的块。</p>
+              </header>
+              <div className="evidence-tools">
+                <button type="button" className={`filter-chip ${evidenceFilter === "kept" ? "active" : ""}`} onClick={() => setEvidenceFilter("kept")}>只看进入 prompt</button>
+                <button type="button" className={`filter-chip ${evidenceFilter === "all" ? "active" : ""}`} onClick={() => setEvidenceFilter("all")}>显示全部</button>
+                <button type="button" className={`filter-chip ${evidenceFilter === "boost" ? "active" : ""}`} onClick={() => setEvidenceFilter("boost")}>只看 boost</button>
+              </div>
+              <div className="evidence-list">
+                {visibleEvidence.length ? visibleEvidence.map((item, order) => (
+                  <details
+                    key={`${item.index}-${item.status}`}
+                    id={`chunk-${item.index}`}
+                    className={item.kept ? "" : "filtered"}
+                    open={order === 0 && item.kept}
+                  >
+                    <summary>
+                      <span>CHUNK {String(item.index).padStart(2, "0")}</span>
+                      <em className="meta-chip section">{item.section}</em>
+                      {item.boost && item.boost !== "-" && <em className="meta-chip boost">boost · {item.boost}</em>}
+                      <em className={`meta-chip ${item.kept ? "kept" : "drop"}`}>{item.kept ? "进入 prompt" : item.status}</em>
+                      <strong className={item.similarity >= 0.6 ? "" : item.similarity >= 0.4 ? "mid" : "low"}>相似度 {(item.similarity * 100).toFixed(1)}%</strong>
+                      <i>⌄</i>
+                    </summary>
+                    <p>{item.content}{typeof item.raw === "number" ? `\n\nraw=${item.raw.toFixed(4)} · status=${item.status}` : ""}</p>
+                  </details>
+                )) : <pre>{analysis.retrievedContext || "暂无检索证据"}</pre>}
+              </div>
+            </article>
+          </>}
+        </section>
+
+        <section className="history" id="history">
+          <div className="section-heading"><div><span>HISTORY</span><h2>最近分析</h2></div><p>{history.length} 条记录</p></div>
+          <div className="history-table">
+            <div className="history-row history-head"><span>报告</span><span>岗位</span><span>状态</span><span>匹配度</span><span>时间</span></div>
+            {history.length === 0 ? (
+              <div className="history-empty">
+                暂无记录。用「一键示例匹配」生成第一条，之后每次分析都会出现在这里。
+              </div>
+            ) : history.slice(0, 8).map((item) => (
+              <button className="history-row" key={item.id} type="button" onClick={() => { setAnalysis(item); document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }); }}>
+                <span>#{item.id} · {item.resumeTitle}</span>
+                <span>{item.jobTitle}</span>
+                <span><i className={item.status.toLowerCase()} />{item.status}</span>
+                <span>{item.status === "PENDING" || !Number.isFinite(Number(item.matchScore)) ? <strong>分析中</strong> : <><strong>{Number(item.matchScore).toFixed(0)}</strong> / 100</>}</span>
+                <span>{new Date(item.createdAt).toLocaleDateString("zh-CN")}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}

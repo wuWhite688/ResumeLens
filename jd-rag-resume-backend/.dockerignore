@@ -1,0 +1,8 @@
+target
+data
+models
+uploads
+*.log
+.git
+.idea
+.vscode

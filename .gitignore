@@ -1,0 +1,41 @@
+# Local agent metadata
+/.agents/
+/.codex/
+
+# Portable MySQL runtime and data
+/mysql-9.7.0-winx64/
+/data/
+/jd-rag-resume-backend.zip
+
+# Java and Gradle build output
+target/
+build/
+.gradle/
+*.class
+
+# Node and frontend build output
+node_modules/
+.next/
+.vinext/
+out/
+dist/
+.wrangler/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local environment files
+.env
+compose.env
+!.env.example
+!compose.env.example
+
+# ResumeLens runtime data
+# application.properties: app.rag.lucene-index-dir=data/lucene/resume-vectors
+**/data/lucene/
+# application.properties: app.upload.resume-dir=uploads/resumes
+**/uploads/resumes/
+models/
+
+# Runtime logs and process markers
+*.log
+*.pid
