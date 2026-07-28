@@ -16,11 +16,13 @@ import com.arthur.jdragresume.service.ResumeService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
@@ -38,8 +40,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@EnabledIfEnvironmentVariable(named = "RESUMELENS_MYSQL_INTEGRATION_URL", matches = ".+")
+@Testcontainers(disabledWithoutDocker = true)
 class ResumeDeleteCascadeMySqlTests {
+
+    @Container
+    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:9.7.0")
+            .withDatabaseName("jd_rag_resume_test")
+            .withUsername("jd_test")
+            .withPassword("jd_test_password")
+            .withConfigurationOverride("mysql-9.7-conf");
 
     @Test
     void deletingAnalyzedResumeReturns204AndCascadesAnalysisAndChunks(@TempDir Path tempDir) throws Exception {
@@ -168,9 +177,9 @@ class ResumeDeleteCascadeMySqlTests {
     }
 
     private DatabaseConfiguration migrateDatabase() {
-        String url = requiredEnvironmentVariable("RESUMELENS_MYSQL_INTEGRATION_URL");
-        String username = requiredEnvironmentVariable("RESUMELENS_MYSQL_INTEGRATION_USERNAME");
-        String password = System.getenv().getOrDefault("RESUMELENS_MYSQL_INTEGRATION_PASSWORD", "");
+        String url = MYSQL.getJdbcUrl();
+        String username = MYSQL.getUsername();
+        String password = MYSQL.getPassword();
 
         Flyway.configure()
                 .dataSource(url, username, password)
@@ -275,14 +284,6 @@ class ResumeDeleteCascadeMySqlTests {
             statement.setLong(1, id);
             statement.executeUpdate();
         }
-    }
-
-    private String requiredEnvironmentVariable(String name) {
-        String value = System.getenv(name);
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException(name + " must not be blank");
-        }
-        return value;
     }
 
     @SuppressWarnings("unchecked")

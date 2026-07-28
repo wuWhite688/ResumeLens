@@ -31,6 +31,7 @@
 		<tika.version>3.2.3</tika.version>
 		<spring-ai.version>1.1.8</spring-ai.version>
 		<lucene.version>10.3.2</lucene.version>
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
 	<dependencyManagement>
 		<dependencies>
@@ -101,6 +102,16 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>mysql</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

@@ -55,6 +55,11 @@ export type Analysis = {
   createdAt: string;
 };
 
+export type AiStatus = {
+  mockEnabled: boolean;
+  model: string;
+};
+
 export type ApiEnvelope<T> = { success: boolean; code: string; message: string; data: T };
 export type PageData<T> = { content: T[]; totalElements: number };
 export type AuthResponse = {

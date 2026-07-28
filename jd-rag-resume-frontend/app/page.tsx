@@ -8,6 +8,7 @@ import {
   AUTH_EXPIRED_EVENT,
   SAMPLE_BULK_JOBS,
   type Analysis,
+  type AiStatus,
   type AuthResponse,
   type Job,
   type PageData,
@@ -109,6 +110,31 @@ const PREVIEW_EVIDENCE = [
   { index: 5, section: "其他", sim: 0.21, status: "低于阈值", text: "兴趣爱好：篮球、摄影。与岗位核心要求相关度较低。", boost: "" },
 ];
 
+function configuredModel(status: AiStatus | null) {
+  return status?.model.trim() || "模型未配置";
+}
+
+function runtimeModeLabel(status: AiStatus | null) {
+  if (!status) return "AI 运行模式确认中";
+  return status.mockEnabled
+    ? "演示模式（离线 mock），未调用真实模型"
+    : `当前生成模型：${configuredModel(status)}`;
+}
+
+function generationProgressLabel(status: AiStatus | null) {
+  if (!status) return "生成模式确认中，正在准备分析…";
+  return status.mockEnabled
+    ? "演示模式（离线 mock），未调用真实模型"
+    : `${configuredModel(status)} 正在生成分析…`;
+}
+
+function pendingAnalysisLabel(status: AiStatus | null) {
+  if (!status) return "本地检索与生成分析正在进行（运行模式确认中），完成后会自动更新。";
+  return status.mockEnabled
+    ? "本地检索与离线 mock 演示分析正在进行；演示模式（离线 mock），未调用真实模型。完成后会自动更新。"
+    : `本地检索与 ${configuredModel(status)} 分析正在进行，完成后会自动更新。`;
+}
+
 export default function Home() {
   const [token, setToken] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -134,6 +160,7 @@ export default function Home() {
   const [bulkImportText, setBulkImportText] = useState(() => JSON.stringify(SAMPLE_BULK_JOBS, null, 2));
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [evidenceFilter, setEvidenceFilter] = useState<"kept" | "all" | "boost">("kept");
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
 
   function clearAuthenticatedView() {
     setToken("");
@@ -182,6 +209,7 @@ export default function Home() {
   }, [analysis, selectedJobId, selectedResumeId]);
 
   useEffect(() => {
+    let active = true;
     const locationTimer = window.setTimeout(() => {
       const params = new URLSearchParams(window.location.search);
       const resumeIdParam = Number(params.get("resumeId"));
@@ -195,6 +223,13 @@ export default function Home() {
       setError("登录已过期，请重新登录");
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    void apiRequest<AiStatus>("/api/ai/status", {}, { auth: false })
+      .then((status) => {
+        if (active) setAiStatus(status);
+      })
+      .catch(() => {
+        // Keep the UI neutral when runtime mode cannot be confirmed.
+      });
     void refreshSession().then(async (session) => {
       if (!session) return;
       setToken(session.accessToken);
@@ -202,6 +237,7 @@ export default function Home() {
       await loadWorkspace();
     });
     return () => {
+      active = false;
       window.clearTimeout(locationTimer);
       window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
     };
@@ -505,7 +541,7 @@ export default function Home() {
     }
     setBusy("analysis");
     setError("");
-    setNotice("Hybrid RAG 正在检索（阈值过滤 + 关键词 boost），DeepSeek 正在生成分析…");
+    setNotice(`Hybrid RAG 正在检索（阈值过滤 + 关键词 boost），${generationProgressLabel(aiStatus)}`);
     try {
       const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
         method: "POST",
@@ -547,7 +583,7 @@ export default function Home() {
           <div className="brand"><span className="brand-mark">R</span><span>ResumeLens</span></div>
           <div className="eyebrow">RAG · RESUME INTELLIGENCE</div>
           <h1>让每一段经历，<br />都对准理想职位。</h1>
-          <p>阿里 GTE 本地检索简历证据，DeepSeek 输出可解释的匹配分析。不是关键词打分，而是一条完整的 RAG 链路。</p>
+          <p>阿里 GTE 本地检索简历证据，{runtimeModeLabel(aiStatus)}。不是关键词打分，而是一条完整的 RAG 链路。</p>
           <div className="auth-metrics">
             <div><strong>768</strong><span>向量维度</span></div>
             <div><strong>Top-K</strong><span>证据召回</span></div>
@@ -751,7 +787,7 @@ export default function Home() {
                 <div><i>1</i><span>文本分块<small>≈900 字</small></span></div>
                 <b>→</b><div><i>2</i><span>CLS 向量<small>GTE 8192</small></span></div>
                 <b>→</b><div><i>3</i><span>混合召回<small>阈值 · Top-K</small></span></div>
-                <b>→</b><div><i>4</i><span>生成分析<small>DeepSeek</small></span></div>
+                <b>→</b><div><i>4</i><span>生成分析<small>{runtimeModeLabel(aiStatus)}</small></span></div>
               </div>
               <div className="analyze-actions">
                 <button className="primary analyze" type="button" onClick={runAnalysis} disabled={busy === "analysis" || !selectedResumeId || !selectedJobId}>
@@ -844,7 +880,7 @@ export default function Home() {
               <div className="result-summary">
                 <span className={`rating ${scoreTone(score)}`}>{analysisPending ? "正在生成报告" : score >= 85 ? "高度匹配" : score >= 70 ? "值得尝试" : "需要优化"}</span>
                 <h3>{analysis.resumeTitle} <b>×</b> {analysis.jobTitle}</h3>
-                <p>{analysisPending ? "本地检索与 DeepSeek 分析正在进行，完成后会自动更新。" : analysis.summary || "已结合检索证据完成岗位匹配分析。"}</p>
+                <p>{analysisPending ? pendingAnalysisLabel(aiStatus) : analysis.summary || "已结合检索证据完成岗位匹配分析。"}</p>
                 <div className="result-stats">
                   <span><strong>{ragMeta?.kept ?? keptEvidence.length}</strong> 个有效证据</span>
                   <span><strong>{ragMeta?.filtered ?? Math.max(0, evidence.length - keptEvidence.length)}</strong> 个已过滤</span>
@@ -884,7 +920,7 @@ export default function Home() {
             <article className="evidence-panel">
               <header>
                 <div><span>RAG EVIDENCE</span><h3>检索证据链</h3></div>
-                <p>DeepSeek 主要基于「进入 prompt」的证据生成；可切换查看被过滤的块。</p>
+                <p>{runtimeModeLabel(aiStatus)}；分析主要基于「进入 prompt」的证据生成，可切换查看被过滤的块。</p>
               </header>
               <div className="evidence-tools">
                 <button type="button" className={`filter-chip ${evidenceFilter === "kept" ? "active" : ""}`} onClick={() => setEvidenceFilter("kept")}>只看进入 prompt</button>

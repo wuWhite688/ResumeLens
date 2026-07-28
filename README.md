@@ -133,6 +133,8 @@ docker compose up --build
 
 启动后访问 `http://localhost:3000`；后端健康检查为 `http://localhost:8080/actuator/health`。
 
+前端通过只读端点 `GET /api/ai/status` 获取当前是否为离线 mock 及模型名，用于如实展示运行模式；该端点不会返回 API Key 或服务地址。
+
 如需真实 DeepSeek，复制 `compose.env.example` 为 `compose.env`，填写密钥并将 `AI_MOCK_ENABLED=false`，再运行：
 
 ```powershell

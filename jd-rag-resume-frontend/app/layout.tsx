@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ResumeLens · RAG 简历匹配",
-  description: "基于阿里 GTE 与 DeepSeek 的可解释简历职位匹配工作台。",
+  description: "基于阿里 GTE 与可配置生成模型的可解释简历职位匹配工作台。",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
