@@ -60,6 +60,14 @@ test("parallel refresh calls share one browser request", async () => {
   assert.equal(second?.accessToken, "fresh-access-token");
 });
 
+test("a successful 204 response resolves without trying to parse an envelope", async () => {
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+
+  const result = await apiRequest<void>("/api/resumes/1", { method: "DELETE" });
+
+  assert.equal(result, undefined);
+});
+
 test("the backend proxy rewrites the refresh cookie path for the browser route", async () => {
   globalThis.fetch = async () => new Response("{}", {
     status: 200,

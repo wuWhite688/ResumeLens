@@ -52,6 +52,7 @@ public class AnalysisHistoryService {
     @Transactional
     public AnalysisHistoryResponse create(AnalysisHistoryRequest request) {
         AnalysisHistory history = new AnalysisHistory();
+        history.setStatus(AnalysisStatus.PENDING);
         applyRequest(history, request);
         return AnalysisHistoryResponse.from(analysisHistoryRepository.save(history));
     }
@@ -84,8 +85,6 @@ public class AnalysisHistoryService {
         history.setUser(user);
         history.setResume(resume);
         history.setJobDescription(jobDescription);
-        history.setMatchScore(request.matchScore());
-        history.setStatus(request.status() == null ? AnalysisStatus.PENDING : request.status());
         history.setSummary(request.summary());
     }
 

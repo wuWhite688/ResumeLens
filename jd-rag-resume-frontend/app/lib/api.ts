@@ -148,6 +148,9 @@ export async function apiRequest<T>(
     }
     notifyAuthExpired();
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
   if (!response.ok || !payload?.success) {
     throw new Error(payload?.message || `请求失败（${response.status}）`);

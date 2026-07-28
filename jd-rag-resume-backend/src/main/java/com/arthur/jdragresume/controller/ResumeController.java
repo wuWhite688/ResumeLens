@@ -68,8 +68,8 @@ public class ResumeController {
     }
 
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(@PathVariable Long id) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long id) {
         resumeService.delete(id);
-        return ApiResponse.ok();
     }
 }
