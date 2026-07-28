@@ -194,6 +194,40 @@ $env:RUN_EMBEDDING_REGRESSION = "true"
 .\mvnw.cmd -Dtest=RealEmbeddingRegressionTests test
 ```
 
+`ResumeDeleteCascadeMySqlTests` 使用 Testcontainers 启动真实的 `mysql:9.7.0`。Docker 不可用时，这 2 项测试会被跳过；因此 Windows 下 `.\mvnw.cmd test` 显示 `BUILD SUCCESS` 不代表级联删除已经验证，控制台会额外打印醒目的 `ResumeDeleteCascadeMySqlTests SKIPPED` 警告。
+
+本机 Docker 运行在 WSL 时，请从 PowerShell 进入后端目录并切换到同一目录的 WSL shell：
+
+```powershell
+Set-Location jd-rag-resume-backend
+wsl.exe -d Ubuntu --cd "$PWD"
+```
+
+WSL 内需安装 JDK 21+。以下命令使用 WSL 的 `/var/run/docker.sock`，不会开放 Docker TCP 端口，也不需要设置 `DOCKER_HOST`：
+
+```bash
+export HTTP_PROXY="${HTTP_PROXY:-http://127.0.0.1:7897}"
+export HTTPS_PROXY="${HTTPS_PROXY:-$HTTP_PROXY}"
+export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1}"
+
+# 首次配置，让当前用户可访问 Docker Unix socket
+sudo usermod -aG docker "$USER"
+
+if ! sudo docker info >/dev/null 2>&1; then
+  sudo env HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" NO_PROXY="$NO_PROXY" \
+    sh -c 'nohup dockerd >/tmp/resumelens-dockerd.log 2>&1 &'
+  for _ in $(seq 1 30); do
+    sudo docker info >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
+
+sudo docker info >/dev/null
+sg docker -c './mvnw test'
+```
+
+完整验收应看到 `ResumeDeleteCascadeMySqlTests` 为 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0`，总汇总为 `Tests run: 28, Failures: 0, Errors: 0, Skipped: 1`（仅跳过真实 embedding 回归）。
+
 ### 3. 前端
 
 ```powershell
