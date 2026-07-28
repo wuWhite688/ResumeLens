@@ -125,17 +125,21 @@ flowchart TD
 
 ### Docker Compose（推荐复现方式）
 
-默认使用离线 AI mock，首次启动会下载 Maven / npm 依赖与本地 GTE 模型：
+首次启动前复制环境变量模板，并为数据库应用账号、数据库 root 账号和 JWT 分别填写非空的强随机口令。Compose 会在任一必填值缺失或为空时直接报错退出，不会回退到仓库内的固定口令。默认仍使用离线 AI mock：
 
 ```powershell
-docker compose up --build
+if (-not (Test-Path compose.env)) { Copy-Item compose.env.example compose.env }
+# 编辑 compose.env，填写 DB_PASSWORD、MYSQL_ROOT_PASSWORD、JWT_SECRET
+docker compose --env-file compose.env up --build
 ```
 
-启动后访问 `http://localhost:3000`；后端健康检查为 `http://localhost:8080/actuator/health`。
+MySQL、后端和前端的宿主端口均仅绑定 `127.0.0.1`。启动后访问 `http://localhost:3000`；后端健康检查为 `http://localhost:8080/actuator/health`。
+
+Compose 的 MySQL 9.7 使用新的 `mysql-9-data` 数据卷，避免把旧版 MySQL 8 的 `mysql-data` 数据目录直接交给 9.7。已有数据不会自动迁移；请保留旧卷，并按 MySQL 官方升级路径或导出/导入方式迁移。
 
 前端通过只读端点 `GET /api/ai/status` 获取当前是否为离线 mock 及模型名，用于如实展示运行模式；该端点不会返回 API Key 或服务地址。
 
-如需真实 DeepSeek，复制 `compose.env.example` 为 `compose.env`，填写密钥并将 `AI_MOCK_ENABLED=false`，再运行：
+如需真实 DeepSeek，在同一份 `compose.env` 中填写 `AI_API_KEY`，将 `AI_MOCK_ENABLED=false`，再运行：
 
 ```powershell
 docker compose --env-file compose.env up --build
@@ -182,6 +186,8 @@ $env:AI_MOCK_ENABLED = "true"
 .\start-backend-background.ps1
 # 健康检查：http://127.0.0.1:8080/actuator/health
 ```
+
+启动脚本会依次从显式的 `-JavaPath`、`JAVA_HOME`、`PATH` 查找 `java.exe`；需要指定独立 JDK 时可运行 `.\start-backend-background.ps1 -JavaPath 'D:\Java\jdk-21\bin\java.exe'`。
 
 首次启动会加载 `models/gte-multilingual-base-int8/`；若缺失，启动脚本会尝试下载 tokenizer 与 ONNX 模型。
 
@@ -282,7 +288,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | `spring.datasource.*` | MySQL 连接（**本地开发明文，上线请外置**） |
 | `spring.flyway.*` | V1 初始化迁移；旧 Hibernate 数据库首次接入时自动 baseline，不改历史数据 |
 | `app.jwt.secret` | JWT 密钥（**上线必须更换**） |
-| `app.jwt.expiration-minutes` | 默认 1440 |
+| `app.jwt.expiration-minutes` | 默认 15 |
 | `ai.*` / 环境变量 | LLM 或 mock |
 | `app.rag.*` | 分块、Top-K、阈值、Hybrid、模型 URI、Lucene 目录 |
 | `app.analysis.pending-timeout-minutes` | 卡住的 PENDING 回收阈值 |

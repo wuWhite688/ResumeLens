@@ -1,5 +1,5 @@
 param(
-    [string]$JavaPath = 'C:\Program Files\Java\jdk-25.0.2\bin\java.exe',
+    [string]$JavaPath,
     [string]$JarPath = (Join-Path $PSScriptRoot 'target\jd-rag-resume-backend-0.0.1-SNAPSHOT.jar'),
     [int]$Port = 8080,
     [int]$MaxWaitSeconds = 180,
@@ -48,14 +48,51 @@ function Save-RemoteFile {
     Move-Item -LiteralPath $partial -Destination $Destination -Force
 }
 
+function Resolve-JavaExecutable {
+    param([string]$RequestedPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $expandedPath = [Environment]::ExpandEnvironmentVariables($RequestedPath)
+        if (Test-Path -LiteralPath $expandedPath -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $expandedPath).Path
+        }
+
+        $requestedCommand = Get-Command -Name $expandedPath -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($null -ne $requestedCommand) {
+            return $requestedCommand.Source
+        }
+
+        throw "java.exe was not found from -JavaPath '$RequestedPath'"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        $javaHomeCandidate = [System.IO.Path]::Combine($env:JAVA_HOME, 'bin', 'java.exe')
+        if (Test-Path -LiteralPath $javaHomeCandidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $javaHomeCandidate).Path
+        }
+    }
+
+    $pathCommand = Get-Command -Name 'java.exe' -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -ne $pathCommand) {
+        return $pathCommand.Source
+    }
+
+    $javaHomeHint = if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        'JAVA_HOME is not set'
+    } else {
+        "JAVA_HOME '$env:JAVA_HOME' does not contain bin\java.exe"
+    }
+    throw "Could not find java.exe: $javaHomeHint, and java.exe is not on PATH. Supply -JavaPath, set JAVA_HOME, or add Java to PATH."
+}
+
 if (Test-PortOpen -TargetPort $Port) {
     Write-Host "Port $Port is already ready."
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $JavaPath)) {
-    throw "java.exe was not found at $JavaPath"
-}
+$JavaExecutable = Resolve-JavaExecutable -RequestedPath $JavaPath
 
 if (-not (Test-Path -LiteralPath $JarPath)) {
     throw "jar was not found at $JarPath"
@@ -104,7 +141,7 @@ if ([string]::IsNullOrWhiteSpace($pathValue)) {
 [Environment]::SetEnvironmentVariable('Path', $pathValue, 'Process')
 
 $process = Start-Process `
-    -FilePath $JavaPath `
+    -FilePath $JavaExecutable `
     -ArgumentList @('-jar', $JarPath) `
     -WorkingDirectory $PSScriptRoot `
     -RedirectStandardOutput $StdoutLog `
