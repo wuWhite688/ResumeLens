@@ -150,7 +150,7 @@ flowchart TD
 
 **阈值 0.72 是怎么定的**
 
-早期版本用的是 0.55，属于凭手感设定。为了给这个数字一个可复核的依据，仓库里有一组阈值扫描实验（[完整报告](experiments/threshold-sweep/RESULTS.md)）：6 份中文简历 × 6 份 JD 组成 18 组配对（对口 / 跨领域 / **同领域但不同方向**各 6 组），走**生产同一条检索路径**——真实 `TextChunker`、真实本地 ONNX embedding、真实 `LuceneVectorIndex`、真实 `ResumeRagService#retrieve`，在 11 个阈值上共 180 次检索，每对的逐块得分都已落盘。
+早期版本用的是 0.55，属于凭手感设定。为了给这个数字一个可复核的依据，仓库里有一组阈值扫描实验（[完整报告](experiments/threshold-sweep/RESULTS.md)）：6 份中文简历 × 6 份 JD 组成 18 组配对（对口 / 跨领域 / **同领域但不同方向**各 6 组），走**生产同一条检索路径**——真实 `TextChunker`、真实本地 ONNX embedding、真实 `LuceneVectorIndex`、真实 `ResumeRagService#retrieve`，在 11 个阈值上共 198 次检索（原先 10 个网格点 × 18 对 = 180，补测的 0.72 再加 18），每对的逐块得分都已落盘。
 
 实测的相似度分布（这颗中文 GTE 的余弦整体偏高）：
 

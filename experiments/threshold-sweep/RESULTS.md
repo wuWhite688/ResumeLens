@@ -13,8 +13,8 @@
 |------|------|------|
 | 分块预览 `dumpChunksForAnnotation` | 跑通 | `dataset/labeled-chunks.preview.json` |
 | 第 1 次完整扫描 | **未跑通 retrieve** | JDK 25 上 Mockito inline mock maker 无法 self-attach。见 `logs/attempt-1-mockito-jdk25-failure.txt`。此时尚未加载有效检索结果。 |
-| 去掉 Mockito 后第 2 次扫描 | **跑通**：18 配对 × 10 阈值 = **180 次** `retrieve()` | `logs/maven-sweep-attempt2.log`、`logs/sweep-console.log` |
-| 补齐 JSONL / 块级 CSV 后第 3 次扫描 | **再次跑通**，指标与第 2 次一致 | `logs/maven-sweep.log`（31.12s 测试时间，BUILD SUCCESS） |
+| 去掉 Mockito 后第 2 次扫描 | **跑通**：18 配对 × 10 阈值 = **180 次** `retrieve()` | `logs/maven-sweep-attempt2.txt`、`logs/sweep-console.txt` |
+| 补齐 JSONL / 块级 CSV 后第 3 次扫描 | **再次跑通**，指标与第 2 次一致 | `logs/maven-sweep.txt`（31.12s 测试时间，BUILD SUCCESS） |
 
 本地模型文件（未提交进仓库）：
 
@@ -228,10 +228,10 @@ N3 是「boost 不越阈」的干净例子：raw < 0.55 < boosted，生产逻辑
 | `run-preview.ps1` / `run-sweep.ps1` | 复现脚本 |
 | `jd-rag-resume-backend/src/test/java/com/arthur/jdragresume/rag/ThresholdSweepExperimentTests.java` | 实验测试类（`RUN_THRESHOLD_SWEEP=true` 才执行） |
 | `logs/attempt-1-mockito-jdk25-failure.txt` | 第一次失败原文 |
-| `logs/maven-sweep-attempt2.log` | 第一次成功扫描的 Maven 完整输出 |
-| `logs/maven-sweep.log` | 复跑（JSONL/块表）Maven 完整输出 |
-| `logs/sweep-console.log` | 测试类自己写的 180 行 retrieve 摘要 |
-| `logs/retrieve-raw.jsonl` | 180 条完整 retrieve 原始输出（含块文本） |
+| `logs/maven-sweep-attempt2.txt` | 第一次成功扫描的 Maven 完整输出（已脱敏绝对路径） |
+| `logs/maven-sweep.txt` | 复跑（JSONL/块表）Maven 完整输出（已脱敏绝对路径） |
+| `logs/sweep-console.txt` | 测试类自己写的 180 行 retrieve 摘要（十档网格；已脱敏绝对路径） |
+| `logs/retrieve-raw.jsonl` | 完整 retrieve 原始输出（含块文本）。十档网格 180 条，加上补测 0.72 的 18 条，合计 **198** 条 |
 | `results/threshold-metrics.csv` / `.json` | 每个阈值一行汇总 |
 | `results/pair-by-threshold.csv` / `.json` | 每个配对×阈值一行 |
 | `results/chunk-scores.csv` | 每个配对×阈值×块的 raw/boosted |

@@ -21,6 +21,11 @@ import {
   setAccessToken,
 } from "./lib/api";
 import {
+  PREVIEW_STRENGTHS,
+  annotatePreviewEvidence,
+  previewConclusion,
+} from "./preview-evidence";
+import {
   asList,
   buildReportMarkdown,
   buildReportPrintHtml,
@@ -102,13 +107,6 @@ const SAMPLE_JOB = {
   description: "负责企业知识库与招聘场景的 RAG 链路建设，覆盖解析、分块、向量检索与生成式分析，和业务一起把匹配结果做得可解释。",
   requirements: "Java / Spring Boot / MySQL；熟悉 Embedding、向量检索；有 JWT/权限与 API 设计经验；加分：DeepSeek/OpenAI 对接、简历解析。",
 };
-
-const PREVIEW_EVIDENCE = [
-  { index: 0, section: "技能", sim: 0.78, status: "进入 prompt", text: "熟练掌握 Java、Spring Boot、MySQL、JWT 与 REST API 开发；有权限体系与全局异常处理实践。", boost: "Java, Spring Boot" },
-  { index: 1, section: "项目", sim: 0.71, status: "进入 prompt", text: "负责简历匹配系统中的 RAG 模块：文本分块、本地 Embedding、Top-K 召回与证据拼装。", boost: "RAG, Embedding" },
-  { index: 2, section: "工作经历", sim: 0.63, status: "进入 prompt", text: "维护招聘业务服务，设计简历/职位表结构，完成用户数据隔离与 JWT 鉴权。", boost: "MySQL" },
-  { index: 5, section: "其他", sim: 0.21, status: "低于阈值", text: "兴趣爱好：篮球、摄影。与岗位核心要求相关度较低。", boost: "" },
-];
 
 function configuredModel(status: AiStatus | null) {
   return status?.model.trim() || "模型未配置";
@@ -588,6 +586,14 @@ export default function Home() {
   const keptCount = ragMeta?.kept ?? keptEvidence.length;
   const averageSimilarity = ragMeta?.avgSimilarity ?? (keptEvidence[0]?.similarity || 0);
   const evidenceConfidence = keptCount === 0 ? "低" : averageSimilarity >= 0.8 || keptCount >= 4 ? "高" : averageSimilarity >= 0.65 || keptCount >= 2 ? "中" : "低";
+  const previewItems = annotatePreviewEvidence(
+    typeof aiStatus?.minSimilarity === "number" ? aiStatus.minSimilarity : undefined,
+  );
+  const previewKept = previewItems.filter((item) => item.kept);
+  const previewAverage = previewKept.length
+    ? previewKept.reduce((sum, item) => sum + item.sim, 0) / previewKept.length
+    : null;
+  const previewStrengths = previewKept.filter((item) => PREVIEW_STRENGTHS[item.index]);
 
   if (!token) {
     return (
@@ -845,23 +851,23 @@ export default function Home() {
                 <div className="result-summary">
                   <span className="rating">示例 · 高度匹配</span>
                   <h3>Java 后端开发简历 <b>×</b> RAG 平台工程师</h3>
-                  <p>基于过阈证据，候选人在 Java 后端与 RAG 工程化方面匹配较好。低相关兴趣片段会被阈值过滤，结论可追溯到证据链。</p>
+                  <p>{previewConclusion(previewItems, typeof aiStatus?.minSimilarity === "number" ? aiStatus.minSimilarity : undefined)}</p>
                   <div className="result-stats">
-                    <span><strong>3</strong> 个有效证据</span>
-                    <span><strong>1</strong> 个已过滤</span>
+                    <span><strong>{previewKept.length}</strong> 个有效证据</span>
+                    <span><strong>{previewItems.length - previewKept.length}</strong> 个已过滤</span>
                     <span><strong>768</strong> 维向量</span>
                     <span><strong>Hybrid</strong> 检索</span>
                   </div>
                 </div>
               </div>
               <div className="diag-strip">
-                <div className="diag good"><div className="k">证据可信度</div><div className="v">高</div><div className="s">3 条进入 prompt</div></div>
-                <div className="diag blue"><div className="k">平均相似度</div><div className="v">0.71</div><div className="s">仅统计保留块</div></div>
+                <div className="diag good"><div className="k">证据可信度</div><div className="v">{previewKept.length >= 2 ? "高" : previewKept.length === 1 ? "中" : "低"}</div><div className="s">{previewKept.length} 条进入 prompt</div></div>
+                <div className="diag blue"><div className="k">平均相似度</div><div className="v">{previewAverage == null ? "—" : previewAverage.toFixed(2)}</div><div className="s">仅统计保留块</div></div>
                 <div className="diag"><div className="k">阈值 / Top-K</div><div className="v" style={{ fontSize: 13 }}>{minSimilarityText(aiStatus)} · K={topKText(aiStatus)}</div><div className="s">弱相关块会被过滤</div></div>
                 <div className="diag warn"><div className="k">池化策略</div><div className="v" style={{ fontSize: 13 }}>CLS</div><div className="s">first token · max 8192</div></div>
               </div>
               <div className="insight-grid">
-                <article className="insight strength"><header><span>✓</span><div><h3>核心优势</h3><p>可追溯 chunk</p></div></header><ul><li>Java / Spring Boot / MySQL 与 JD 对齐 <span className="cite">[chunk-0]</span></li><li>有 RAG 检索链路落地经验 <span className="cite">[chunk-1]</span></li><li>熟悉 JWT 与数据隔离 <span className="cite">[chunk-2]</span></li></ul></article>
+                <article className="insight strength"><header><span>✓</span><div><h3>核心优势</h3><p>可追溯 chunk</p></div></header><ul>{previewStrengths.length ? previewStrengths.map((item) => <li key={item.index}>{PREVIEW_STRENGTHS[item.index]} <span className="cite">[chunk-{item.index}]</span></li>) : <li>当前阈值下暂无过阈示例块</li>}</ul></article>
                 <article className="insight gap"><header><span>△</span><div><h3>能力缺口</h3><p>证据未充分覆盖</p></div></header><ul><li>高并发调优指标描述不足</li><li>自动化测试 / CI 证据偏少</li><li>向量库运维经验未体现</li></ul></article>
                 <article className="insight improve"><header><span>↗</span><div><h3>优化建议</h3><p>让简历更靠近岗位</p></div></header><ul><li>补充召回率/延迟等量化结果</li><li>写明向量存储与重建策略</li><li>增加发布流水线描述</li></ul></article>
               </div>
@@ -871,13 +877,13 @@ export default function Home() {
                   <p>真实分析后，这里会显示简历原文分块与相似度。</p>
                 </header>
                 <div className="evidence-list preview-evidence">
-                  {PREVIEW_EVIDENCE.map((item) => (
-                    <details key={item.index} open={item.index < 2} className={item.status === "进入 prompt" ? "" : "filtered"}>
+                  {previewItems.map((item) => (
+                    <details key={item.index} open={item.kept} className={item.kept ? "" : "filtered"}>
                       <summary>
                         <span>CHUNK {String(item.index).padStart(2, "0")}</span>
                         <em className="meta-chip section">{item.section}</em>
                         {item.boost && <em className="meta-chip boost">boost · {item.boost}</em>}
-                        <em className={`meta-chip ${item.status === "进入 prompt" ? "kept" : "drop"}`}>{item.status}</em>
+                        <em className={`meta-chip ${item.kept ? "kept" : "drop"}`}>{item.status}</em>
                         <strong className={item.sim >= 0.6 ? "" : item.sim >= 0.4 ? "mid" : "low"}>相似度 {(item.sim * 100).toFixed(1)}%</strong>
                         <i>⌄</i>
                       </summary>
