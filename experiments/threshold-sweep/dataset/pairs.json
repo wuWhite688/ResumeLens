@@ -1,0 +1,256 @@
+{
+  "version": 1,
+  "notes": "goldPhrases 仅用于正样本：块文本包含任一短语则标为相关。负样本与难负样本的 goldPhrases 必须为空。",
+  "resumes": [
+    {
+      "id": "java-backend-chen",
+      "file": "resumes/java-backend-chen.txt",
+      "title": "Java 后端开发工程师",
+      "candidateName": "陈思远"
+    },
+    {
+      "id": "frontend-lin",
+      "file": "resumes/frontend-lin.txt",
+      "title": "前端开发工程师",
+      "candidateName": "林晓晴"
+    },
+    {
+      "id": "algorithm-zhou",
+      "file": "resumes/algorithm-zhou.txt",
+      "title": "推荐算法工程师",
+      "candidateName": "周启明"
+    },
+    {
+      "id": "analyst-wu",
+      "file": "resumes/analyst-wu.txt",
+      "title": "数据分析师",
+      "candidateName": "吴佳宁"
+    },
+    {
+      "id": "nurse-zhao",
+      "file": "resumes/nurse-zhao.txt",
+      "title": "心内科责任护士",
+      "candidateName": "赵敏"
+    },
+    {
+      "id": "accountant-sun",
+      "file": "resumes/accountant-sun.txt",
+      "title": "总账会计",
+      "candidateName": "孙丽华"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "java-backend-payment",
+      "file": "jobs/java-backend-payment.txt",
+      "title": "Java 后端开发工程师（支付中台）",
+      "companyName": "汇通支付科技",
+      "location": "杭州",
+      "employmentType": "全职"
+    },
+    {
+      "id": "frontend-react",
+      "file": "jobs/frontend-react.txt",
+      "title": "前端开发工程师（React）",
+      "companyName": "视界互动",
+      "location": "上海",
+      "employmentType": "全职"
+    },
+    {
+      "id": "algorithm-recsys",
+      "file": "jobs/algorithm-recsys.txt",
+      "title": "推荐算法工程师",
+      "companyName": "北辰信息流",
+      "location": "北京",
+      "employmentType": "全职"
+    },
+    {
+      "id": "data-analyst",
+      "file": "jobs/data-analyst.txt",
+      "title": "数据分析师（会员与促销）",
+      "companyName": "橙湾零售",
+      "location": "深圳",
+      "employmentType": "全职"
+    },
+    {
+      "id": "nurse-cardiology",
+      "file": "jobs/nurse-cardiology.txt",
+      "title": "心内科责任护士",
+      "companyName": "成都市某三甲医院心内科",
+      "location": "成都",
+      "employmentType": "全职"
+    },
+    {
+      "id": "accountant",
+      "file": "jobs/accountant.txt",
+      "title": "总账会计",
+      "companyName": "宁江机械财务部",
+      "location": "南京",
+      "employmentType": "全职"
+    }
+  ],
+  "pairs": [
+    {
+      "id": "P1",
+      "type": "positive",
+      "resumeId": "java-backend-chen",
+      "jobId": "java-backend-payment",
+      "shouldMatch": true,
+      "goldPhrases": ["Spring Boot", "Redis", "Kafka", "对账", "幂等", "MySQL", "支付"],
+      "notes": "Java 后端简历 × 支付中台 Java JD，技能与对账/支付项目应对口"
+    },
+    {
+      "id": "P2",
+      "type": "positive",
+      "resumeId": "frontend-lin",
+      "jobId": "frontend-react",
+      "shouldMatch": true,
+      "goldPhrases": ["React 18", "TypeScript", "Vite", "React Query", "Storybook", "组件库", "LCP"],
+      "notes": "前端简历 × React 中后台 JD"
+    },
+    {
+      "id": "P3",
+      "type": "positive",
+      "resumeId": "algorithm-zhou",
+      "jobId": "algorithm-recsys",
+      "shouldMatch": true,
+      "goldPhrases": ["PyTorch", "DeepFM", "DIN", "双塔", "精排", "召回", "位置偏差"],
+      "notes": "推荐算法简历 × 推荐算法 JD"
+    },
+    {
+      "id": "P4",
+      "type": "positive",
+      "resumeId": "analyst-wu",
+      "jobId": "data-analyst",
+      "shouldMatch": true,
+      "goldPhrases": ["Tableau", "Pandas", "漏斗", "RFM", "口径", "窗口函数", "A/B"],
+      "notes": "数据分析简历 × 会员促销分析 JD"
+    },
+    {
+      "id": "P5",
+      "type": "positive",
+      "resumeId": "nurse-zhao",
+      "jobId": "nurse-cardiology",
+      "shouldMatch": true,
+      "goldPhrases": ["心电监护", "静脉输液", "PICC", "心力衰竭", "急性冠脉", "出入量", "BLS"],
+      "notes": "心内科护士简历 × 心内科护士 JD"
+    },
+    {
+      "id": "P6",
+      "type": "positive",
+      "resumeId": "accountant-sun",
+      "jobId": "accountant",
+      "shouldMatch": true,
+      "goldPhrases": ["用友 U8", "增值税", "进项转出", "收入确认", "银行余额调节表", "中级会计"],
+      "notes": "总账会计简历 × 总账会计 JD"
+    },
+    {
+      "id": "N1",
+      "type": "negative",
+      "resumeId": "java-backend-chen",
+      "jobId": "nurse-cardiology",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "Java 后端 × 护士岗，跨领域"
+    },
+    {
+      "id": "N2",
+      "type": "negative",
+      "resumeId": "java-backend-chen",
+      "jobId": "accountant",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "Java 后端 × 会计岗，跨领域"
+    },
+    {
+      "id": "N3",
+      "type": "negative",
+      "resumeId": "frontend-lin",
+      "jobId": "accountant",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "前端 × 会计岗，跨领域"
+    },
+    {
+      "id": "N4",
+      "type": "negative",
+      "resumeId": "nurse-zhao",
+      "jobId": "java-backend-payment",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "护士 × Java 后端，跨领域"
+    },
+    {
+      "id": "N5",
+      "type": "negative",
+      "resumeId": "accountant-sun",
+      "jobId": "frontend-react",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "会计 × React 前端，跨领域"
+    },
+    {
+      "id": "N6",
+      "type": "negative",
+      "resumeId": "algorithm-zhou",
+      "jobId": "nurse-cardiology",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "算法工程师 × 护士岗，跨领域"
+    },
+    {
+      "id": "H1",
+      "type": "hard_negative",
+      "resumeId": "java-backend-chen",
+      "jobId": "frontend-react",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "Java 后端 × React 前端：同属研发，共性词多"
+    },
+    {
+      "id": "H2",
+      "type": "hard_negative",
+      "resumeId": "frontend-lin",
+      "jobId": "java-backend-payment",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "前端 × Java 后端：同属研发，方向不同"
+    },
+    {
+      "id": "H3",
+      "type": "hard_negative",
+      "resumeId": "algorithm-zhou",
+      "jobId": "data-analyst",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "推荐算法 × 数据分析：都碰数据，一个训练模型一个做业务报表"
+    },
+    {
+      "id": "H4",
+      "type": "hard_negative",
+      "resumeId": "analyst-wu",
+      "jobId": "algorithm-recsys",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "数据分析 × 推荐算法：SQL/看板 vs 深度学习精排"
+    },
+    {
+      "id": "H5",
+      "type": "hard_negative",
+      "resumeId": "java-backend-chen",
+      "jobId": "algorithm-recsys",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "Java 后端 × 推荐算法：都是技术岗，证据不应过阈"
+    },
+    {
+      "id": "H6",
+      "type": "hard_negative",
+      "resumeId": "frontend-lin",
+      "jobId": "data-analyst",
+      "shouldMatch": false,
+      "goldPhrases": [],
+      "notes": "前端 × 数据分析：都可能提到指标/看板，但职责不同"
+    }
+  ]
+}

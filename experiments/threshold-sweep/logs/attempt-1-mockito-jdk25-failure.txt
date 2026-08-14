@@ -1,0 +1,13 @@
+First sweep attempt failed BEFORE any retrieve() call.
+
+Cause: Mockito inline mock maker cannot self-attach on this machine's JDK 25.
+
+Java: 25.0.2 (Oracle)
+Error excerpt:
+  Error opening zip file or JAR manifest missing: ...\byte-buddy-agent-1.17.5.jar
+  Could not initialize plugin: interface org.mockito.plugins.MockMaker
+  MockitoInitializationException: Could not initialize inline Byte Buddy mock maker.
+
+This is an experiment-harness issue, not a ResumeRagService bug.
+Fix applied: replace Mockito with a JDK Proxy in-memory ResumeChunkRepository and re-run.
+No embedding or retrieve numbers were produced in this attempt.
