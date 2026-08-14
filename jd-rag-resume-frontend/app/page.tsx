@@ -135,6 +135,19 @@ function pendingAnalysisLabel(status: AiStatus | null) {
     : `本地检索与 ${configuredModel(status)} 分析正在进行，完成后会自动更新。`;
 }
 
+/**
+ * 检索阈值与 Top-K 一律从 /api/ai/status 读取当前服务端配置。
+ * 这些数字曾经写死在界面里，服务端阈值调整后界面仍显示旧值，
+ * 展示出来的检索策略与实际行为对不上。
+ */
+function minSimilarityText(status: AiStatus | null) {
+  return typeof status?.minSimilarity === "number" ? status.minSimilarity.toFixed(2) : "—";
+}
+
+function topKText(status: AiStatus | null) {
+  return typeof status?.topK === "number" ? String(status.topK) : "—";
+}
+
 export default function Home() {
   const [token, setToken] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -655,7 +668,7 @@ export default function Home() {
           <div className="overview-card"><span>已存简历</span><strong>{resumes.length}</strong><small>可在第 03 步选择</small></div>
           <div className="overview-card"><span>已存职位</span><strong>{jobs.length}</strong><small>JD 双 Query 检索</small></div>
           <div className="overview-card"><span>分析记录</span><strong>{history.length}</strong><small>含证据链落库</small></div>
-          <div className="overview-card hot"><span>检索策略</span><strong>CLS · Hybrid</strong><small>minSim 0.55 · Top-K 5</small></div>
+          <div className="overview-card hot"><span>检索策略</span><strong>CLS · Hybrid</strong><small>minSim {minSimilarityText(aiStatus)} · Top-K {topKText(aiStatus)}</small></div>
         </div>
 
         {(error || notice) && <div className={`toast ${error ? "error" : "success"}`}><span>{error ? "!" : "✓"}</span>{error || notice}<button onClick={() => { setError(""); setNotice(""); }}>×</button></div>}
@@ -780,7 +793,7 @@ export default function Home() {
                 <span className="badge-new">V2</span>
                 <div>
                   <strong>改进检索默认开启</strong>
-                  <p>GTE CLS 池化 · minSimilarity=0.55 · Top-K=5 · Hybrid + 双 Query · [chunk-N] 引用</p>
+                  <p>GTE CLS 池化 · minSimilarity={minSimilarityText(aiStatus)} · Top-K={topKText(aiStatus)} · Hybrid + 双 Query · [chunk-N] 引用</p>
                 </div>
               </div>
               <div className="pipeline">
@@ -844,7 +857,7 @@ export default function Home() {
               <div className="diag-strip">
                 <div className="diag good"><div className="k">证据可信度</div><div className="v">高</div><div className="s">3 条进入 prompt</div></div>
                 <div className="diag blue"><div className="k">平均相似度</div><div className="v">0.71</div><div className="s">仅统计保留块</div></div>
-                <div className="diag"><div className="k">阈值 / Top-K</div><div className="v" style={{ fontSize: 13 }}>0.55 · K=5</div><div className="s">弱相关块会被过滤</div></div>
+                <div className="diag"><div className="k">阈值 / Top-K</div><div className="v" style={{ fontSize: 13 }}>{minSimilarityText(aiStatus)} · K={topKText(aiStatus)}</div><div className="s">弱相关块会被过滤</div></div>
                 <div className="diag warn"><div className="k">池化策略</div><div className="v" style={{ fontSize: 13 }}>CLS</div><div className="s">first token · max 8192</div></div>
               </div>
               <div className="insight-grid">
@@ -902,7 +915,8 @@ export default function Home() {
               </div>
               <div className="diag">
                 <div className="k">阈值 / Top-K</div>
-                <div className="v" style={{ fontSize: 13 }}>{(ragMeta?.minSimilarity ?? 0.55).toFixed(2)} · K={ragMeta?.topK ?? 5}</div>
+                {/* 优先用这次分析实际生效的 rag-meta；缺失时退回服务端当前配置，而不是写死的旧值 */}
+                <div className="v" style={{ fontSize: 13 }}>{typeof ragMeta?.minSimilarity === "number" ? ragMeta.minSimilarity.toFixed(2) : minSimilarityText(aiStatus)} · K={ragMeta?.topK ?? topKText(aiStatus)}</div>
                 <div className="s">弱相关块会被过滤</div>
               </div>
               <div className="diag warn">

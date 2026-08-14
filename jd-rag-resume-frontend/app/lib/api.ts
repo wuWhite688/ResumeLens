@@ -58,6 +58,9 @@ export type Analysis = {
 export type AiStatus = {
   mockEnabled: boolean;
   model: string;
+  /** 服务端当前生效的检索阈值与 Top-K，避免界面写死后与配置脱节 */
+  minSimilarity: number;
+  topK: number;
 };
 
 export type ApiEnvelope<T> = { success: boolean; code: string; message: string; data: T };
