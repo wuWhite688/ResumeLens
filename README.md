@@ -16,6 +16,35 @@
 
 ---
 
+## 界面预览
+
+> 以下截图均由本机真实运行的服务截取（Spring Boot + MySQL + 本地 ONNX 向量检索 + Next.js）。
+> 后端以 `AI_MOCK_ENABLED=true` 演示模式运行，因此**报告正文是 mock 生成的文案**，界面也如实标注了这一点；
+> 而**检索链路是真跑的**——分块、CLS 向量化、Lucene 召回、相似度与过阈判定都来自真实计算，截图中的 `raw=0.8845 · status=kept` 即真实检索元数据。
+
+**工作台 · 三步建立匹配任务**
+
+![ResumeLens 工作台](docs/screenshots/02-workbench.png)
+
+**匹配分析报告**：匹配分、证据可信度、平均相似度、当前阈值与 Top-K、池化策略，优势条目直接携带 `[chunk-N]` 引用。
+
+![匹配分析报告](docs/screenshots/04-analysis-report.png)
+
+**检索证据链**：每个候选块都展示所属小节、命中的 boost 关键词、是否进入 prompt 以及原始相似度，可按「只看进入 prompt / 显示全部 / 只看 boost」切换——这是本项目对「可解释 RAG」的具体兑现，而不是只给一个分数。
+
+![RAG 检索证据链](docs/screenshots/05-rag-evidence.png)
+
+<details>
+<summary>登录页与工作台整页长图</summary>
+
+![登录页](docs/screenshots/01-login.png)
+
+[工作台整页截图](docs/screenshots/03-workbench-full.png)（含表单、报告、证据链与历史记录）
+
+</details>
+
+---
+
 ## 功能一览
 
 - **账号**：注册 / 登录、BCrypt 密码、JWT 无状态鉴权、按用户隔离数据
