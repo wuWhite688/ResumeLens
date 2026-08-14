@@ -15,6 +15,8 @@ P1,positive,0.650000,0,教育,0.873297,0.978297,true,kept,Java|后端开发工�
 P1,positive,0.650000,1,项目,0.800884,0.905884,true,kept,Java|T+1|对账,true
 P1,positive,0.700000,0,教育,0.873297,0.978297,true,kept,Java|后端开发工程师|杭州,true
 P1,positive,0.700000,1,项目,0.800884,0.905884,true,kept,Java|T+1|对账,true
+P1,positive,0.720000,0,教育,0.873297,0.978297,true,kept,Java|后端开发工程师|杭州,true
+P1,positive,0.720000,1,项目,0.800884,0.905884,true,kept,Java|T+1|对账,true
 P1,positive,0.750000,0,教育,0.873297,0.978297,true,kept,Java|后端开发工程师|杭州,true
 P1,positive,0.750000,1,项目,0.800884,0.905884,true,kept,Java|T+1|对账,true
 P1,positive,0.800000,0,教育,0.873297,0.978297,true,kept,Java|后端开发工程师|杭州,true
@@ -35,6 +37,8 @@ P2,positive,0.650000,0,教育,0.893998,0.998998,true,kept,前端开发工程师|
 P2,positive,0.650000,1,项目,0.751004,0.856004,true,kept,React|权限点|TypeScript,true
 P2,positive,0.700000,0,教育,0.893998,0.998998,true,kept,前端开发工程师|React|视界互动,true
 P2,positive,0.700000,1,项目,0.751004,0.856004,true,kept,React|权限点|TypeScript,true
+P2,positive,0.720000,0,教育,0.893998,0.998998,true,kept,前端开发工程师|React|视界互动,true
+P2,positive,0.720000,1,项目,0.751004,0.856004,true,kept,React|权限点|TypeScript,true
 P2,positive,0.750000,0,教育,0.893998,0.998998,true,kept,前端开发工程师|React|视界互动,true
 P2,positive,0.750000,1,项目,0.751004,0.856004,true,kept,React|权限点|TypeScript,true
 P2,positive,0.800000,0,教育,0.893998,0.998998,true,kept,前端开发工程师|React|视界互动,true
@@ -55,6 +59,8 @@ P3,positive,0.650000,0,教育,0.862052,0.967052,true,kept,推荐算法工程师|
 P3,positive,0.650000,1,项目,0.779478,0.884478,true,kept,CTR|PyTorch|AUC,true
 P3,positive,0.700000,0,教育,0.862052,0.967052,true,kept,推荐算法工程师|北辰信息流|北京,true
 P3,positive,0.700000,1,项目,0.779478,0.884478,true,kept,CTR|PyTorch|AUC,true
+P3,positive,0.720000,0,教育,0.862052,0.967052,true,kept,推荐算法工程师|北辰信息流|北京,true
+P3,positive,0.720000,1,项目,0.779478,0.884478,true,kept,CTR|PyTorch|AUC,true
 P3,positive,0.750000,0,教育,0.862052,0.967052,true,kept,推荐算法工程师|北辰信息流|北京,true
 P3,positive,0.750000,1,项目,0.779478,0.884478,true,kept,CTR|PyTorch|AUC,true
 P3,positive,0.800000,0,教育,0.862052,0.967052,true,kept,推荐算法工程师|北辰信息流|北京,true
@@ -75,6 +81,8 @@ P4,positive,0.650000,0,教育,0.811441,0.916441,true,kept,数据分析师|会员
 P4,positive,0.650000,1,自我评价,0.776695,0.881695,true,kept,SQL|Tableau|Excel,true
 P4,positive,0.700000,0,教育,0.811441,0.916441,true,kept,数据分析师|会员与促销|橙湾零售,true
 P4,positive,0.700000,1,自我评价,0.776695,0.881695,true,kept,SQL|Tableau|Excel,true
+P4,positive,0.720000,0,教育,0.811441,0.916441,true,kept,数据分析师|会员与促销|橙湾零售,true
+P4,positive,0.720000,1,自我评价,0.776695,0.881695,true,kept,SQL|Tableau|Excel,true
 P4,positive,0.750000,0,教育,0.811441,0.916441,true,kept,数据分析师|会员与促销|橙湾零售,true
 P4,positive,0.750000,1,自我评价,0.776695,0.881695,true,kept,SQL|Tableau|Excel,true
 P4,positive,0.800000,0,教育,0.811441,0.916441,true,kept,数据分析师|会员与促销|橙湾零售,true
@@ -95,6 +103,8 @@ P5,positive,0.650000,0,教育,0.895986,0.999000,true,kept,成都|心力衰竭|3.
 P5,positive,0.650000,1,自我评价,0.840782,0.875782,true,kept,6.,false
 P5,positive,0.700000,0,教育,0.895986,0.999000,true,kept,成都|心力衰竭|3.,true
 P5,positive,0.700000,1,自我评价,0.840782,0.875782,true,kept,6.,false
+P5,positive,0.720000,0,教育,0.895986,0.999000,true,kept,成都|心力衰竭|3.,true
+P5,positive,0.720000,1,自我评价,0.840782,0.875782,true,kept,6.,false
 P5,positive,0.750000,0,教育,0.895986,0.999000,true,kept,成都|心力衰竭|3.,true
 P5,positive,0.750000,1,自我评价,0.840782,0.875782,true,kept,6.,false
 P5,positive,0.800000,0,教育,0.895986,0.999000,true,kept,成都|心力衰竭|3.,true
@@ -115,6 +125,8 @@ P6,positive,0.650000,0,教育,0.868447,0.973447,true,kept,总账会计|南京|U8
 P6,positive,0.650000,1,项目,0.804232,0.839232,true,kept,U8,true
 P6,positive,0.700000,0,教育,0.868447,0.973447,true,kept,总账会计|南京|U8,true
 P6,positive,0.700000,1,项目,0.804232,0.839232,true,kept,U8,true
+P6,positive,0.720000,0,教育,0.868447,0.973447,true,kept,总账会计|南京|U8,true
+P6,positive,0.720000,1,项目,0.804232,0.839232,true,kept,U8,true
 P6,positive,0.750000,0,教育,0.868447,0.973447,true,kept,总账会计|南京|U8,true
 P6,positive,0.750000,1,项目,0.804232,0.839232,true,kept,U8,true
 P6,positive,0.800000,0,教育,0.868447,0.973447,true,kept,总账会计|南京|U8,true
@@ -135,6 +147,8 @@ N1,negative,0.650000,0,教育,0.561600,0.666600,false,below-threshold,1.|2.|3.,f
 N1,negative,0.650000,1,项目,0.583627,0.618627,false,below-threshold,2.,false
 N1,negative,0.700000,0,教育,0.561600,0.666600,false,below-threshold,1.|2.|3.,false
 N1,negative,0.700000,1,项目,0.583627,0.618627,false,below-threshold,2.,false
+N1,negative,0.720000,0,教育,0.561600,0.666600,false,below-threshold,1.|2.|3.,false
+N1,negative,0.720000,1,项目,0.583627,0.618627,false,below-threshold,2.,false
 N1,negative,0.750000,0,教育,0.561600,0.666600,false,below-threshold,1.|2.|3.,false
 N1,negative,0.750000,1,项目,0.583627,0.618627,false,below-threshold,2.,false
 N1,negative,0.800000,0,教育,0.561600,0.666600,false,below-threshold,1.|2.|3.,false
@@ -155,6 +169,8 @@ N2,negative,0.650000,0,教育,0.582510,0.687510,false,below-threshold,1.|2.|3.,f
 N2,negative,0.650000,1,项目,0.646012,0.681012,false,below-threshold,2.,false
 N2,negative,0.700000,0,教育,0.582510,0.687510,false,below-threshold,1.|2.|3.,false
 N2,negative,0.700000,1,项目,0.646012,0.681012,false,below-threshold,2.,false
+N2,negative,0.720000,0,教育,0.582510,0.687510,false,below-threshold,1.|2.|3.,false
+N2,negative,0.720000,1,项目,0.646012,0.681012,false,below-threshold,2.,false
 N2,negative,0.750000,0,教育,0.582510,0.687510,false,below-threshold,1.|2.|3.,false
 N2,negative,0.750000,1,项目,0.646012,0.681012,false,below-threshold,2.,false
 N2,negative,0.800000,0,教育,0.582510,0.687510,false,below-threshold,1.|2.|3.,false
@@ -175,6 +191,8 @@ N3,negative,0.650000,0,教育,0.521350,0.626350,false,below-threshold,1.|2.|4.,f
 N3,negative,0.650000,1,项目,0.534307,0.604307,false,below-threshold,2.|4.,false
 N3,negative,0.700000,0,教育,0.521350,0.626350,false,below-threshold,1.|2.|4.,false
 N3,negative,0.700000,1,项目,0.534307,0.604307,false,below-threshold,2.|4.,false
+N3,negative,0.720000,0,教育,0.521350,0.626350,false,below-threshold,1.|2.|4.,false
+N3,negative,0.720000,1,项目,0.534307,0.604307,false,below-threshold,2.|4.,false
 N3,negative,0.750000,0,教育,0.521350,0.626350,false,below-threshold,1.|2.|4.,false
 N3,negative,0.750000,1,项目,0.534307,0.604307,false,below-threshold,2.|4.,false
 N3,negative,0.800000,0,教育,0.521350,0.626350,false,below-threshold,1.|2.|4.,false
@@ -195,6 +213,8 @@ N4,negative,0.650000,0,教育,0.617093,0.617093,false,below-threshold,,false
 N4,negative,0.650000,1,自我评价,0.594818,0.594818,false,below-threshold,,false
 N4,negative,0.700000,0,教育,0.617093,0.617093,false,below-threshold,,false
 N4,negative,0.700000,1,自我评价,0.594818,0.594818,false,below-threshold,,false
+N4,negative,0.720000,0,教育,0.617093,0.617093,false,below-threshold,,false
+N4,negative,0.720000,1,自我评价,0.594818,0.594818,false,below-threshold,,false
 N4,negative,0.750000,0,教育,0.617093,0.617093,false,below-threshold,,false
 N4,negative,0.750000,1,自我评价,0.594818,0.594818,false,below-threshold,,false
 N4,negative,0.800000,0,教育,0.617093,0.617093,false,below-threshold,,false
@@ -215,6 +235,8 @@ N5,negative,0.650000,0,教育,0.521369,0.591369,false,below-threshold,2.|熟练�
 N5,negative,0.650000,1,项目,0.554852,0.554852,false,below-threshold,,false
 N5,negative,0.700000,0,教育,0.521369,0.591369,false,below-threshold,2.|熟练使用,false
 N5,negative,0.700000,1,项目,0.554852,0.554852,false,below-threshold,,false
+N5,negative,0.720000,0,教育,0.521369,0.591369,false,below-threshold,2.|熟练使用,false
+N5,negative,0.720000,1,项目,0.554852,0.554852,false,below-threshold,,false
 N5,negative,0.750000,0,教育,0.521369,0.591369,false,below-threshold,2.|熟练使用,false
 N5,negative,0.750000,1,项目,0.554852,0.554852,false,below-threshold,,false
 N5,negative,0.800000,0,教育,0.521369,0.591369,false,below-threshold,2.|熟练使用,false
@@ -235,6 +257,8 @@ N6,negative,0.650000,1,项目,0.557218,0.627218,false,below-threshold,2.|3.,fals
 N6,negative,0.650000,0,教育,0.503793,0.573793,false,below-threshold,1.|4.,false
 N6,negative,0.700000,1,项目,0.557218,0.627218,false,below-threshold,2.|3.,false
 N6,negative,0.700000,0,教育,0.503793,0.573793,false,below-threshold,1.|4.,false
+N6,negative,0.720000,1,项目,0.557218,0.627218,false,below-threshold,2.|3.,false
+N6,negative,0.720000,0,教育,0.503793,0.573793,false,below-threshold,1.|4.,false
 N6,negative,0.750000,1,项目,0.557218,0.627218,false,below-threshold,2.|3.,false
 N6,negative,0.750000,0,教育,0.503793,0.573793,false,below-threshold,1.|4.,false
 N6,negative,0.800000,1,项目,0.557218,0.627218,false,below-threshold,2.|3.,false
@@ -255,6 +279,8 @@ H1,hard_negative,0.650000,0,教育,0.690011,0.795011,true,kept,1.|2.|3.,false
 H1,hard_negative,0.650000,1,项目,0.625047,0.660047,false,below-threshold,2.,false
 H1,hard_negative,0.700000,0,教育,0.690011,0.795011,false,below-threshold,1.|2.|3.,false
 H1,hard_negative,0.700000,1,项目,0.625047,0.660047,false,below-threshold,2.,false
+H1,hard_negative,0.720000,0,教育,0.690011,0.795011,false,below-threshold,1.|2.|3.,false
+H1,hard_negative,0.720000,1,项目,0.625047,0.660047,false,below-threshold,2.,false
 H1,hard_negative,0.750000,0,教育,0.690011,0.795011,false,below-threshold,1.|2.|3.,false
 H1,hard_negative,0.750000,1,项目,0.625047,0.660047,false,below-threshold,2.,false
 H1,hard_negative,0.800000,0,教育,0.690011,0.795011,false,below-threshold,1.|2.|3.,false
@@ -275,6 +301,8 @@ H2,hard_negative,0.650000,0,教育,0.674584,0.779584,true,kept,Java|1.|2.,false
 H2,hard_negative,0.650000,1,项目,0.648980,0.718980,false,below-threshold,REST|2.,false
 H2,hard_negative,0.700000,0,教育,0.674584,0.779584,false,below-threshold,Java|1.|2.,false
 H2,hard_negative,0.700000,1,项目,0.648980,0.718980,false,below-threshold,REST|2.,false
+H2,hard_negative,0.720000,0,教育,0.674584,0.779584,false,below-threshold,Java|1.|2.,false
+H2,hard_negative,0.720000,1,项目,0.648980,0.718980,false,below-threshold,REST|2.,false
 H2,hard_negative,0.750000,0,教育,0.674584,0.779584,false,below-threshold,Java|1.|2.,false
 H2,hard_negative,0.750000,1,项目,0.648980,0.718980,false,below-threshold,REST|2.,false
 H2,hard_negative,0.800000,0,教育,0.674584,0.779584,false,below-threshold,Java|1.|2.,false
@@ -295,6 +323,8 @@ H3,hard_negative,0.650000,1,项目,0.652813,0.757813,true,kept,Python|2.|3.,fals
 H3,hard_negative,0.650000,0,教育,0.629322,0.734322,false,below-threshold,Python|A/B|1.,false
 H3,hard_negative,0.700000,1,项目,0.652813,0.757813,false,below-threshold,Python|2.|3.,false
 H3,hard_negative,0.700000,0,教育,0.629322,0.734322,false,below-threshold,Python|A/B|1.,false
+H3,hard_negative,0.720000,1,项目,0.652813,0.757813,false,below-threshold,Python|2.|3.,false
+H3,hard_negative,0.720000,0,教育,0.629322,0.734322,false,below-threshold,Python|A/B|1.,false
 H3,hard_negative,0.750000,1,项目,0.652813,0.757813,false,below-threshold,Python|2.|3.,false
 H3,hard_negative,0.750000,0,教育,0.629322,0.734322,false,below-threshold,Python|A/B|1.,false
 H3,hard_negative,0.800000,1,项目,0.652813,0.757813,false,below-threshold,Python|2.|3.,false
@@ -315,6 +345,8 @@ H4,hard_negative,0.650000,0,教育,0.674479,0.779479,true,kept,A/B|2.|熟练使�
 H4,hard_negative,0.650000,1,自我评价,0.681663,0.681663,true,kept,,false
 H4,hard_negative,0.700000,0,教育,0.674479,0.779479,false,below-threshold,A/B|2.|熟练使用,false
 H4,hard_negative,0.700000,1,自我评价,0.681663,0.681663,false,below-threshold,,false
+H4,hard_negative,0.720000,0,教育,0.674479,0.779479,false,below-threshold,A/B|2.|熟练使用,false
+H4,hard_negative,0.720000,1,自我评价,0.681663,0.681663,false,below-threshold,,false
 H4,hard_negative,0.750000,0,教育,0.674479,0.779479,false,below-threshold,A/B|2.|熟练使用,false
 H4,hard_negative,0.750000,1,自我评价,0.681663,0.681663,false,below-threshold,,false
 H4,hard_negative,0.800000,0,教育,0.674479,0.779479,false,below-threshold,A/B|2.|熟练使用,false
@@ -335,6 +367,8 @@ H5,hard_negative,0.650000,0,教育,0.620023,0.725023,false,below-threshold,1.|�
 H5,hard_negative,0.650000,1,项目,0.606240,0.641240,false,below-threshold,2.,false
 H5,hard_negative,0.700000,0,教育,0.620023,0.725023,false,below-threshold,1.|计算机|2.,false
 H5,hard_negative,0.700000,1,项目,0.606240,0.641240,false,below-threshold,2.,false
+H5,hard_negative,0.720000,0,教育,0.620023,0.725023,false,below-threshold,1.|计算机|2.,false
+H5,hard_negative,0.720000,1,项目,0.606240,0.641240,false,below-threshold,2.,false
 H5,hard_negative,0.750000,0,教育,0.620023,0.725023,false,below-threshold,1.|计算机|2.,false
 H5,hard_negative,0.750000,1,项目,0.606240,0.641240,false,below-threshold,2.,false
 H5,hard_negative,0.800000,0,教育,0.620023,0.725023,false,below-threshold,1.|计算机|2.,false
@@ -355,6 +389,8 @@ H6,hard_negative,0.650000,0,教育,0.585845,0.690845,false,below-threshold,1.|2.
 H6,hard_negative,0.650000,1,项目,0.617154,0.687154,false,below-threshold,2.|4.,false
 H6,hard_negative,0.700000,0,教育,0.585845,0.690845,false,below-threshold,1.|2.|精通,false
 H6,hard_negative,0.700000,1,项目,0.617154,0.687154,false,below-threshold,2.|4.,false
+H6,hard_negative,0.720000,0,教育,0.585845,0.690845,false,below-threshold,1.|2.|精通,false
+H6,hard_negative,0.720000,1,项目,0.617154,0.687154,false,below-threshold,2.|4.,false
 H6,hard_negative,0.750000,0,教育,0.585845,0.690845,false,below-threshold,1.|2.|精通,false
 H6,hard_negative,0.750000,1,项目,0.617154,0.687154,false,below-threshold,2.|4.,false
 H6,hard_negative,0.800000,0,教育,0.585845,0.690845,false,below-threshold,1.|2.|精通,false

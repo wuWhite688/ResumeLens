@@ -13,8 +13,17 @@ public class RagProperties {
     private int chunkSize = 900;
     private int chunkOverlap = 120;
     private int topK = 5;
-    /** Drop chunks below this cosine similarity before Top-K. */
-    private double minSimilarity = 0.55;
+    /**
+     * Drop chunks below this cosine similarity before Top-K.
+     *
+     * <p>Calibrated against experiments/threshold-sweep: on that dataset the highest
+     * non-relevant chunk scored 0.690011 and the lowest gold-relevant chunk 0.751004,
+     * so 0.72 sits near the middle of the only separating interval. The previous 0.55
+     * fell inside the negative distribution and let every hard-negative pair through.
+     * The calibration set is small and synthetic - see the experiment README before
+     * reusing this number with a different embedding model or chunk size.
+     */
+    private double minSimilarity = 0.72;
     /** Add a small boost when JD keywords appear in a resume chunk. */
     private boolean hybridEnabled = true;
     private double keywordBoost = 0.035;

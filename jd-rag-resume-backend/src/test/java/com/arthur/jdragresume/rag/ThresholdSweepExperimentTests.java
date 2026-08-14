@@ -663,7 +663,9 @@ class ThresholdSweepExperimentTests {
         properties.setChunkSize(900);
         properties.setChunkOverlap(120);
         properties.setTopK(5);
-        properties.setMinSimilarity(0.55);
+        // 与生产默认值保持一致；扫描时每个阈值都会被 setMinSimilarity 覆盖，
+        // 这里的取值只影响分块预览等不扫描阈值的路径。
+        properties.setMinSimilarity(0.72);
         properties.setHybridEnabled(true);
         properties.setKeywordBoost(0.035);
         properties.setMaxKeywordBoosts(3);
@@ -675,6 +677,13 @@ class ThresholdSweepExperimentTests {
         List<Double> thresholds = new ArrayList<>();
         for (int value = 35; value <= 80; value += 5) {
             thresholds.add(value / 100.0);
+            // 块级边界校准点。本数据集上可分离区间是 (0.690011, 0.751004)——
+            // 下界是最高的非金标难负块 H1 chunk0，上界是最低的金标相关块 P2 chunk1，
+            // 宽度仅 0.061，而 0.05 的网格正好跨过它，两端的 0.70 与 0.75 都紧贴边界。
+            // 0.72 取该区间中点（0.720508）附近，需要单独测量。
+            if (value == 70) {
+                thresholds.add(0.72);
+            }
         }
         return thresholds;
     }
