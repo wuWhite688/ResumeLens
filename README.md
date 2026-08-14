@@ -63,7 +63,7 @@
 ```text
 .
 ├── README.md                      # 本文件（作品集说明）
-├── start-mysql.ps1                # 本地 MySQL 启动（便携包路径见脚本）
+├── start-mysql.ps1                # 便携 MySQL 启动（参数 / 环境变量 / 自动探测）
 ├── stop-mysql.ps1
 ├── connect-mysql.ps1
 ├── jd-rag-resume-backend/         # Spring Boot API + RAG
@@ -217,7 +217,14 @@ GRANT ALL PRIVILEGES ON jd_rag_resume.* TO 'jd_app'@'%';
 FLUSH PRIVILEGES;
 ```
 
-若使用本仓库附带的便携 MySQL 脚本，请按你机器上的 `start-mysql.ps1` 路径启动（脚本内 `basedir` / `datadir` 需与本机一致）。
+若使用本仓库附带的便携 MySQL 脚本：
+
+```powershell
+.\start-mysql.ps1
+.\connect-mysql.ps1
+```
+
+路径按此顺序解析：参数 `-MysqlBaseDir` / `-MysqlDataDir`，环境变量 `RESUMELENS_MYSQL_HOME` / `RESUMELENS_MYSQL_DATA`，然后自动探测仓库内 `mysql-*-winx64` + `data\`，或 `C:\tmp\mysql-*-winx64` + `C:\tmp\mysql-*-data`。`basedir` 与 `datadir` 必须成对匹配；找不到会报错并列出已检查位置。
 
 ### 2. 后端
 
