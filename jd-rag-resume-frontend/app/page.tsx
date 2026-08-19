@@ -35,6 +35,7 @@ import {
   parseRagMeta,
   reportFilename,
 } from "./report-export";
+import { appendResumeUploadFields, prepareResumeUploadDraft } from "./resume-upload";
 
 const EMPTY_RESUME_FORM = {
   title: "",
@@ -297,7 +298,7 @@ export default function Home() {
     const nextFile = event.target.files?.[0] || null;
     setFile(nextFile);
     if (!nextFile) return;
-    setResumeForm((current) => ({ ...current, title: current.title || nextFile.name.replace(/\.[^.]+$/, "") }));
+    setResumeForm((current) => prepareResumeUploadDraft(current, nextFile.name));
     if (/\.(txt|md)$/i.test(nextFile.name)) {
       const text = await nextFile.text();
       setResumeForm((current) => ({ ...current, rawText: text }));
@@ -362,7 +363,7 @@ export default function Home() {
       } else if (file) {
         const form = new FormData();
         form.append("file", file);
-        Object.entries(resumeForm).forEach(([key, value]) => value && form.append(key, value));
+        appendResumeUploadFields(form, resumeForm);
         saved = await apiRequest<Resume>("/api/resumes/upload", { method: "POST", body: form });
         setResumes((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
         setNotice("简历已上传保存，等待向量检索");
