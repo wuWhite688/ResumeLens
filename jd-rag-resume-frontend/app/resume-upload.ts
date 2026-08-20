@@ -14,8 +14,14 @@ export function prepareResumeUploadDraft<T extends ResumeUploadDraft>(current: T
   };
 }
 
+/**
+ * Multipart file uploads must treat the uploaded file as the single source of
+ * resume text. Never send rawText alongside a file: a stale async text read or
+ * leftover demo text must not override what the backend extracts from the file.
+ */
 export function appendResumeUploadFields(form: FormData, draft: ResumeUploadDraft) {
-  Object.entries(draft).forEach(([key, value]) => {
+  const { rawText: _rawText, ...metadata } = draft;
+  Object.entries(metadata).forEach(([key, value]) => {
     if (value) form.append(key, value);
   });
 }
