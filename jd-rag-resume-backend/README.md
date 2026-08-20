@@ -23,6 +23,8 @@ Spring Boot backend for **ResumeLens / JD-RAG**：JWT 鉴权、简历与 JD CRUD
 
 | 变量 | 说明 |
 |------|------|
+| `DB_PASSWORD` | MySQL 应用账号密码，必填 |
+| `JWT_SECRET` | JWT HS256 密钥，必填且至少 32 字节 |
 | `AI_API_KEY` | LLM API Key |
 | `AI_BASE_URL` | OpenAI 兼容基址或完整 `/chat/completions` URL |
 | `AI_MODEL` | 模型名 |
@@ -33,6 +35,6 @@ Spring Boot backend for **ResumeLens / JD-RAG**：JWT 鉴权、简历与 JD CRUD
 | `REFRESH_TOKEN_EXPIRATION_DAYS` | refresh token 有效期，默认 7 天 |
 | `REFRESH_COOKIE_SECURE` | HTTPS 部署时设为 `true`；本地 HTTP 默认为 `false` |
 
-本地数据库与 JWT 默认值见 `src/main/resources/application.properties`（仅开发用）。
+`DB_PASSWORD` 和 `JWT_SECRET` 不再提供仓库内默认值；缺失时应用会拒绝启动，避免直接运行 jar 时静默使用公开凭据。
 
 refresh token 仅以 SHA-256 哈希写入数据库，每次续期都会轮换；已撤销 token 再次出现时会撤销同一 token family，用于阻断重放。
