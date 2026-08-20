@@ -1,9 +1,11 @@
 package com.arthur.jdragresume.repository;
 
 import com.arthur.jdragresume.entity.AnalysisHistory;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,6 +15,10 @@ import java.time.LocalDateTime;
 
 public interface AnalysisHistoryRepository extends JpaRepository<AnalysisHistory, Long> {
     Optional<AnalysisHistory> findByIdAndUserId(Long id, Long userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select history from AnalysisHistory history where history.id = :id")
+    Optional<AnalysisHistory> findByIdForUpdate(@Param("id") Long id);
 
     @Query("""
             select history from AnalysisHistory history

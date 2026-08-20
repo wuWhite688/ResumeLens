@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { readFile } from "node:fs/promises";
 import { appendResumeUploadFields, prepareResumeUploadDraft } from "../app/resume-upload.ts";
 
 test("selecting a PDF clears sample rawText so the backend extracts the uploaded file", () => {
@@ -46,4 +47,10 @@ test("file upload serialization ignores stale rawText even if async state races"
   assert.equal(form.get("candidateName"), "Arthur");
   assert.equal(form.get("email"), "arthur@example.com");
   assert.equal(form.has("rawText"), false);
+});
+
+test("workbench disables the rawText field while a file is attached", async () => {
+  const pageSrc = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(pageSrc, /disabled=\{\!\!file && !editingResumeId\}/);
+  assert.doesNotMatch(pageSrc, /nextFile\.text\(\)/);
 });

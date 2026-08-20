@@ -4,6 +4,7 @@ import com.arthur.jdragresume.ai.AiProperties;
 import com.arthur.jdragresume.common.ApiResponse;
 import com.arthur.jdragresume.dto.ai.AiStatusResponse;
 import com.arthur.jdragresume.rag.RagProperties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,10 +14,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class AiStatusController {
     private final AiProperties aiProperties;
     private final RagProperties ragProperties;
+    private final long pendingTimeoutMinutes;
 
-    public AiStatusController(AiProperties aiProperties, RagProperties ragProperties) {
+    public AiStatusController(
+            AiProperties aiProperties,
+            RagProperties ragProperties,
+            @Value("${app.analysis.pending-timeout-minutes:10}") long pendingTimeoutMinutes
+    ) {
         this.aiProperties = aiProperties;
         this.ragProperties = ragProperties;
+        this.pendingTimeoutMinutes = Math.max(1, pendingTimeoutMinutes);
     }
 
     /**
@@ -30,7 +37,8 @@ public class AiStatusController {
                 aiProperties.isMockEnabled(),
                 model == null ? "" : model.trim(),
                 ragProperties.getMinSimilarity(),
-                ragProperties.getTopK()
+                ragProperties.getTopK(),
+                pendingTimeoutMinutes
         ));
     }
 }

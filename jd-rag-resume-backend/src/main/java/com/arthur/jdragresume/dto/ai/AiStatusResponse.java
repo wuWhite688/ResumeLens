@@ -8,6 +8,7 @@ public record AiStatusResponse(
         boolean mockEnabled,
         String model,
         double minSimilarity,
-        int topK
+        int topK,
+        long pendingTimeoutMinutes
 ) {
 }

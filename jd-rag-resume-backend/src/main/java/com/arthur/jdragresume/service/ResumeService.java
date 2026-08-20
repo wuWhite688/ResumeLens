@@ -104,11 +104,13 @@ public class ResumeService {
             throw new BusinessException("UNSUPPORTED_FILE_TYPE", "only PDF, DOC, DOCX, TXT and MD files are supported");
         }
 
+        validateUploadMetadata(title, candidateName, email);
+
         AppUser user = currentUserService.getCurrentUser();
         Path userDir = resumeUploadDir.resolve(user.getId().toString());
         String storedName = UUID.randomUUID() + "." + extension;
         Path storedPath = userDir.resolve(storedName);
-        String parsedRawText = resolveRawText(file, rawText);
+        String parsedRawText = limitRawText(resolveRawText(file, rawText));
 
         try {
             Files.createDirectories(userDir);
@@ -119,7 +121,7 @@ public class ResumeService {
 
         Resume resume = new Resume();
         resume.setUser(user);
-        resume.setTitle(isBlank(title) ? originalFileName : title);
+        resume.setTitle(isBlank(title) ? truncate(originalFileName, 120) : title.trim());
         resume.setCandidateName(candidateName);
         resume.setPhone(phone);
         resume.setEmail(email);
@@ -168,7 +170,40 @@ public class ResumeService {
         resume.setCandidateName(request.candidateName());
         resume.setPhone(request.phone());
         resume.setEmail(request.email());
-        resume.setRawText(request.rawText());
+        resume.setRawText(limitRawText(request.rawText()));
+    }
+
+    private void validateUploadMetadata(String title, String candidateName, String email) {
+        if (isBlank(candidateName)) {
+            throw new BusinessException("VALIDATION_ERROR", "candidateName must not be blank");
+        }
+        if (candidateName.trim().length() > 80) {
+            throw new BusinessException("VALIDATION_ERROR", "candidateName must be at most 80 characters");
+        }
+        if (title != null && title.trim().length() > 120) {
+            throw new BusinessException("VALIDATION_ERROR", "title must be at most 120 characters");
+        }
+        if (!isBlank(email) && !email.contains("@")) {
+            throw new BusinessException("VALIDATION_ERROR", "email must be a valid address");
+        }
+    }
+
+    private String limitRawText(String rawText) {
+        if (rawText != null && rawText.length() > ResumeTextExtractor.MAX_RAW_TEXT_CHARS) {
+            throw new BusinessException(
+                    "RESUME_TEXT_TOO_LONG",
+                    "resume text exceeds the maximum of " + ResumeTextExtractor.MAX_RAW_TEXT_CHARS + " characters"
+            );
+        }
+        return rawText;
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
     private String resolveRawText(MultipartFile file, String rawText) {

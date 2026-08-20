@@ -30,4 +30,23 @@ class ResumeTextExtractorTests {
         assertTrue(parsed.contains("Spring Boot"));
         assertTrue(parsed.contains("RAG resume matching service"));
     }
+
+    @Test
+    void rejectsPlainTextAboveWriteLimit() {
+        String oversized = "Java Spring Boot experience. ".repeat(12_000);
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "resume.txt",
+                "text/plain",
+                oversized.getBytes(StandardCharsets.UTF_8)
+        );
+
+        ResumeTextExtractor extractor = new ResumeTextExtractor(new ResumeTextQualityValidator());
+        com.arthur.jdragresume.exception.BusinessException exception =
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        com.arthur.jdragresume.exception.BusinessException.class,
+                        () -> extractor.extract(file)
+                );
+        org.junit.jupiter.api.Assertions.assertEquals("RESUME_TEXT_TOO_LONG", exception.getCode());
+    }
 }

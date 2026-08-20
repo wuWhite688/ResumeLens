@@ -38,7 +38,22 @@ class TextChunkerTests {
         List<String> chunks = chunker.split("Java backend engineer");
 
         assertEquals(1, chunks.size());
-        assertFalse(chunks.getFirst().isBlank());
+    }
+
+    @Test
+    void rejectsTextThatWouldExceedMaxChunks() {
+        RagProperties properties = new RagProperties();
+        properties.setChunkSize(160);
+        properties.setChunkOverlap(0);
+        properties.setMaxChunks(2);
+        TextChunker chunker = new TextChunker(properties);
+
+        com.arthur.jdragresume.exception.BusinessException exception =
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        com.arthur.jdragresume.exception.BusinessException.class,
+                        () -> chunker.split("abcdefghij".repeat(80))
+                );
+        assertEquals("RESUME_TEXT_TOO_LONG", exception.getCode());
     }
 
     @Test

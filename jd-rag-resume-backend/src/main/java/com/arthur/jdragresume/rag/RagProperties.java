@@ -13,6 +13,8 @@ public class RagProperties {
     private int chunkSize = 900;
     private int chunkOverlap = 120;
     private int topK = 5;
+    private int maxChunks = 80;
+    private int embeddingBatchSize = 8;
     /**
      * Drop chunks below this cosine similarity before Top-K.
      *
@@ -65,6 +67,22 @@ public class RagProperties {
 
     public void setTopK(int topK) {
         this.topK = topK;
+    }
+
+    public int getMaxChunks() {
+        return maxChunks;
+    }
+
+    public void setMaxChunks(int maxChunks) {
+        this.maxChunks = maxChunks;
+    }
+
+    public int getEmbeddingBatchSize() {
+        return embeddingBatchSize;
+    }
+
+    public void setEmbeddingBatchSize(int embeddingBatchSize) {
+        this.embeddingBatchSize = embeddingBatchSize;
     }
 
     public double getMinSimilarity() {

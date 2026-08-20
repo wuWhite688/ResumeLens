@@ -172,7 +172,7 @@ public class ResumeRagService {
             throw new BusinessException("RESUME_TEXT_EMPTY", "resume rawText is empty");
         }
 
-        List<float[]> embeddings = embeddingModel.embed(contents);
+        List<float[]> embeddings = embedInBatches(contents);
         if (embeddings.size() != contents.size()) {
             throw new BusinessException("RAG_EMBEDDING_FAILED", "embedding result count does not match resume chunks");
         }
@@ -204,6 +204,16 @@ public class ResumeRagService {
         Object[] locks = new Object[count];
         java.util.Arrays.setAll(locks, ignored -> new Object());
         return locks;
+    }
+
+    private List<float[]> embedInBatches(List<String> contents) {
+        int batchSize = Math.max(1, properties.getEmbeddingBatchSize());
+        List<float[]> embeddings = new ArrayList<>(contents.size());
+        for (int start = 0; start < contents.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, contents.size());
+            embeddings.addAll(embeddingModel.embed(contents.subList(start, end)));
+        }
+        return embeddings;
     }
 
     private List<float[]> buildQueryEmbeddings(JobDescription jobDescription) {
