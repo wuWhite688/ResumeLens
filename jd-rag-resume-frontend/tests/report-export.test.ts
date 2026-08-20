@@ -5,6 +5,7 @@ import {
   buildReportMarkdown,
   buildReportPrintHtml,
   evidenceChunks,
+  openPrintableReport,
   parseRagMeta,
   reportFilename,
 } from "../app/report-export.ts";
@@ -75,4 +76,44 @@ test("reportFilename is filesystem-safe", () => {
   const name = reportFilename(analysis, "md");
   assert.match(name, /^resume-match-42-.*\.md$/);
   assert.doesNotMatch(name, /[\\/:*?"<>|]/);
+});
+
+test("openPrintableReport keeps popup handle and severs opener", () => {
+  const writes: string[] = [];
+  let requestedFeatures = "";
+  const popup = {
+    opener: {} as unknown,
+    document: {
+      open() {},
+      write(value: string) {
+        writes.push(value);
+      },
+      close() {},
+    },
+  };
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      open(_url: string, _target: string, features: string) {
+        requestedFeatures = features;
+        return popup;
+      },
+    },
+  });
+
+  try {
+    openPrintableReport("<p>print me</p>");
+  } finally {
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      delete (globalThis as typeof globalThis & { window?: unknown }).window;
+    }
+  }
+
+  assert.equal(requestedFeatures, "width=920,height=800");
+  assert.equal(popup.opener, null);
+  assert.deepEqual(writes, ["<p>print me</p>"]);
 });
