@@ -293,10 +293,11 @@ export function downloadTextFile(filename: string, content: string, mime = "text
 }
 
 export function openPrintableReport(html: string) {
-  const popup = window.open("", "_blank", "noopener,noreferrer,width=920,height=800");
+  const popup = window.open("", "_blank", "width=920,height=800");
   if (!popup) {
     throw new Error("浏览器拦截了弹窗，请允许后重试以导出 PDF");
   }
+  popup.opener = null;
   popup.document.open();
   popup.document.write(html);
   popup.document.close();
