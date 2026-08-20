@@ -31,3 +31,19 @@ test("selecting a file derives a title only when the title is empty", () => {
   assert.equal(draft.title, "arthur-resume");
   assert.equal(draft.candidateName, "Arthur");
 });
+
+test("file upload serialization ignores stale rawText even if async state races", () => {
+  const form = new FormData();
+  appendResumeUploadFields(form, {
+    title: "Arthur Resume",
+    candidateName: "Arthur",
+    phone: "",
+    email: "arthur@example.com",
+    rawText: "stale text from a previously selected txt file",
+  });
+
+  assert.equal(form.get("title"), "Arthur Resume");
+  assert.equal(form.get("candidateName"), "Arthur");
+  assert.equal(form.get("email"), "arthur@example.com");
+  assert.equal(form.has("rawText"), false);
+});
