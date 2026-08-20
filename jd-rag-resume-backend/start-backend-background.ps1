@@ -9,6 +9,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if ([string]::IsNullOrWhiteSpace($env:DB_PASSWORD)) {
+    throw "DB_PASSWORD is required. Set a MySQL password before starting the backend."
+}
+if ([string]::IsNullOrWhiteSpace($env:JWT_SECRET)) {
+    throw "JWT_SECRET is required. Use a random value of at least 32 bytes."
+}
+if ([System.Text.Encoding]::UTF8.GetByteCount($env:JWT_SECRET) -lt 32) {
+    throw "JWT_SECRET must be at least 32 bytes for HS256."
+}
+
 function Test-PortOpen {
     param([int]$TargetPort)
 

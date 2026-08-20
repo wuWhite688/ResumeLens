@@ -201,18 +201,19 @@ docker compose --env-file compose.env up --build
 
 - **JDK 21+**（本机曾用 JDK 25 验证；`pom.xml` 声明 `java.version=21`）
 - **Maven Wrapper**（仓库自带 `mvnw` / `mvnw.cmd`）
-- **MySQL 8+/9**，库名 `jd_rag_resume`，应用账号默认见配置
+- **MySQL 8+/9**，库名 `jd_rag_resume`
+- **环境变量**：`DB_PASSWORD`、`JWT_SECRET`（至少 32 字节）必须设置，后端不会使用仓库内默认口令
 - **Node.js ≥ 22.13**
 - （可选）LLM：`AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`；或 `AI_MOCK_ENABLED=true` 做离线演示
 
 ### 1. 数据库
 
-创建库与用户（示例，与 `application.properties` 一致）：
+创建库与用户（示例，口令请换成你自己的强随机值，并与 `DB_PASSWORD` 一致）：
 
 ```sql
 CREATE DATABASE IF NOT EXISTS jd_rag_resume
   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'jd_app'@'%' IDENTIFIED BY 'jd_app_123456';
+CREATE USER IF NOT EXISTS 'jd_app'@'%' IDENTIFIED BY 'your-db-password';
 GRANT ALL PRIVILEGES ON jd_rag_resume.* TO 'jd_app'@'%';
 FLUSH PRIVILEGES;
 ```
@@ -230,6 +231,9 @@ FLUSH PRIVILEGES;
 
 ```powershell
 cd jd-rag-resume-backend
+
+$env:DB_PASSWORD = "your-db-password"
+$env:JWT_SECRET = "replace-with-at-least-32-byte-random-secret"
 
 # 可选：真实 LLM
 $env:AI_API_KEY = "sk-..."

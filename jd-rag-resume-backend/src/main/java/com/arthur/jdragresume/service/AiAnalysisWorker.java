@@ -27,6 +27,7 @@ public class AiAnalysisWorker {
     private final AiClient aiClient;
     private final AnalysisResultParser resultParser;
     private final AnalysisHistoryRepository historyRepository;
+    private final AnalysisHistoryUpdateService historyUpdateService;
     private final ResumeRagService resumeRagService;
     private final RagProperties ragProperties;
 
@@ -34,12 +35,14 @@ public class AiAnalysisWorker {
             AiClient aiClient,
             AnalysisResultParser resultParser,
             AnalysisHistoryRepository historyRepository,
+            AnalysisHistoryUpdateService historyUpdateService,
             ResumeRagService resumeRagService,
             RagProperties ragProperties
     ) {
         this.aiClient = aiClient;
         this.resultParser = resultParser;
         this.historyRepository = historyRepository;
+        this.historyUpdateService = historyUpdateService;
         this.resumeRagService = resumeRagService;
         this.ragProperties = ragProperties;
     }
@@ -53,7 +56,7 @@ public class AiAnalysisWorker {
             Resume resume = history.getResume();
             JobDescription jobDescription = history.getJobDescription();
             List<RetrievedChunk> chunks = resumeRagService.retrieve(history.getUser(), resume, jobDescription);
-            history.setRetrievedContext(retrievedContext(chunks));
+            String retrievedContext = retrievedContext(chunks);
             List<RetrievedChunk> kept = chunks.stream().filter(RetrievedChunk::kept).toList();
             HardSkillCoverage hardSkills = resumeRagService.assessHardSkills(jobDescription, kept);
             AiAnalysisResult result = resultParser.parse(aiClient.chat(
@@ -61,26 +64,24 @@ public class AiAnalysisWorker {
                     userPrompt(resume, jobDescription, evidenceForPrompt(kept, hardSkills))
             ));
 
-            history.setMatchScore(constrainScore(result.matchScore(), kept, hardSkills));
-            history.setStatus(AnalysisStatus.COMPLETED);
-            history.setSummary(result.summary());
-            history.setStrengths(result.strengths());
-            history.setMissingSkills(mergeMissingSkills(result.missingSkills(), hardSkills));
-            history.setImprovementSuggestions(result.improvementSuggestions());
-            history.setInterviewQuestions(result.interviewQuestions());
-            historyRepository.save(history);
+            BigDecimal matchScore = constrainScore(result.matchScore(), kept, hardSkills);
+            String missingSkills = mergeMissingSkills(result.missingSkills(), hardSkills);
+            boolean completed = historyUpdateService.completeIfPending(historyId, locked -> {
+                locked.setRetrievedContext(retrievedContext);
+                locked.setMatchScore(matchScore);
+                locked.setSummary(result.summary());
+                locked.setStrengths(result.strengths());
+                locked.setMissingSkills(missingSkills);
+                locked.setImprovementSuggestions(result.improvementSuggestions());
+                locked.setInterviewQuestions(result.interviewQuestions());
+            });
+            if (!completed) {
+                log.info("Skipped stale AI analysis completion for {}", historyId);
+            }
         } catch (Throwable ex) {
             log.error("Async AI analysis {} failed", historyId, ex);
-            markFailed(historyId, ex);
+            historyUpdateService.failIfPending(historyId, "AI analysis failed: " + ex.getClass().getSimpleName());
         }
-    }
-
-    private void markFailed(Long historyId, Throwable ex) {
-        historyRepository.findById(historyId).ifPresent(history -> {
-            history.setStatus(AnalysisStatus.FAILED);
-            history.setSummary("AI analysis failed: " + ex.getClass().getSimpleName());
-            historyRepository.save(history);
-        });
     }
 
     private String systemPrompt() {

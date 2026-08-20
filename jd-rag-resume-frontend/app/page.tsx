@@ -35,6 +35,7 @@ import {
   parseRagMeta,
   reportFilename,
 } from "./report-export";
+import { analysisPollTimeoutMs, pollAnalysisUntilSettled } from "./analysis-poll";
 import { appendResumeUploadFields, prepareResumeUploadDraft } from "./resume-upload";
 
 const EMPTY_RESUME_FORM = {
@@ -182,18 +183,19 @@ export default function Home() {
   }
 
   async function waitForAnalysis(initial: Analysis) {
-    let current = initial;
-    setAnalysis(current);
-    setHistory((items) => [current, ...items.filter((item) => item.id !== current.id)]);
+    const { analysis: current, timedOut } = await pollAnalysisUntilSettled(initial, {
+      timeoutMs: analysisPollTimeoutMs(aiStatus?.pendingTimeoutMinutes),
+      fetchById: (id) => apiRequest<Analysis>(`/api/analysis-histories/${id}`),
+      onProgress: (next) => {
+        setAnalysis(next);
+        setHistory((items) => [next, ...items.filter((item) => item.id !== next.id)]);
+      },
+    });
 
-    for (let attempt = 0; current.status === "PENDING" && attempt < 60; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      current = await apiRequest<Analysis>(`/api/analysis-histories/${current.id}`);
-      setAnalysis(current);
-      setHistory((items) => [current, ...items.filter((item) => item.id !== current.id)]);
+    if (timedOut) {
+      setNotice("分析仍在后台运行，可稍后在历史记录中查看结果");
+      return current;
     }
-
-    if (current.status === "PENDING") throw new Error("分析仍在后台运行，请稍后重试");
     if (current.status === "FAILED") throw new Error(current.summary || "AI 分析失败");
     return current;
   }
@@ -299,10 +301,6 @@ export default function Home() {
     setFile(nextFile);
     if (!nextFile) return;
     setResumeForm((current) => prepareResumeUploadDraft(current, nextFile.name));
-    if (/\.(txt|md)$/i.test(nextFile.name)) {
-      const text = await nextFile.text();
-      setResumeForm((current) => ({ ...current, rawText: text }));
-    }
   }
 
   function beginEditResume(item: Resume) {
@@ -702,7 +700,7 @@ export default function Home() {
               </label>
               <div className="field-row"><label>简历标题<input required value={resumeForm.title} onChange={(e) => setResumeForm({ ...resumeForm, title: e.target.value })} placeholder="Java 后端开发简历" /></label><label>候选人<input required value={resumeForm.candidateName} onChange={(e) => setResumeForm({ ...resumeForm, candidateName: e.target.value })} placeholder="姓名" /></label></div>
               <div className="field-row"><label>手机<input value={resumeForm.phone} onChange={(e) => setResumeForm({ ...resumeForm, phone: e.target.value })} placeholder="可选" /></label><label>邮箱<input type="email" value={resumeForm.email} onChange={(e) => setResumeForm({ ...resumeForm, email: e.target.value })} placeholder="可选" /></label></div>
-              <label>简历文本<textarea required={!file || !!editingResumeId} rows={8} value={resumeForm.rawText} onChange={(e) => setResumeForm({ ...resumeForm, rawText: e.target.value })} placeholder="可直接粘贴简历正文；上传 PDF / DOCX 时可留空" /></label>
+              <label>简历文本<textarea required={!file || !!editingResumeId} rows={8} value={resumeForm.rawText} onChange={(e) => setResumeForm({ ...resumeForm, rawText: e.target.value })} disabled={!!file && !editingResumeId} placeholder={file ? "已选择文件，将由服务端解析正文；保存后可在详情中编辑" : "可直接粘贴简历正文；上传文件时由服务端解析"} /></label>
               <div className="form-actions">
                 <button className="secondary" disabled={busy === "resume"}>{busy === "resume" ? "保存中…" : editingResumeId ? "更新简历" : "保存简历"}</button>
                 {editingResumeId && (

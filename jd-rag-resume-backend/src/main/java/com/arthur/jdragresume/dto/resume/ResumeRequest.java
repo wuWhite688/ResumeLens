@@ -9,6 +9,6 @@ public record ResumeRequest(
         @NotBlank @Size(max = 80) String candidateName,
         @Size(max = 40) String phone,
         @Email @Size(max = 128) String email,
-        @NotBlank String rawText
+        @NotBlank @Size(max = 200000) String rawText
 ) {
 }

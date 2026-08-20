@@ -1,5 +1,6 @@
 package com.arthur.jdragresume.rag;
 
+import com.arthur.jdragresume.exception.BusinessException;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -35,6 +36,12 @@ public class TextChunker {
             String chunk = normalized.substring(start, end).trim();
             if (!chunk.isEmpty()) {
                 chunks.add(chunk);
+            }
+            if (chunks.size() > Math.max(1, properties.getMaxChunks())) {
+                throw new BusinessException(
+                        "RESUME_TEXT_TOO_LONG",
+                        "resume text exceeds the maximum of " + properties.getMaxChunks() + " chunks"
+                );
             }
             if (end >= normalized.length()) {
                 break;
