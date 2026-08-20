@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
 @Service
 public class ResumeService {
     private static final Logger log = LoggerFactory.getLogger(ResumeService.class);
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "doc", "docx", "txt");
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "doc", "docx", "txt", "md");
 
     private final ResumeRepository resumeRepository;
     private final ResumeChunkRepository resumeChunkRepository;
@@ -101,7 +101,7 @@ public class ResumeService {
         String originalFileName = file.getOriginalFilename() == null ? "resume" : file.getOriginalFilename();
         String extension = extractExtension(originalFileName);
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new BusinessException("UNSUPPORTED_FILE_TYPE", "only PDF, DOC, DOCX and TXT files are supported");
+            throw new BusinessException("UNSUPPORTED_FILE_TYPE", "only PDF, DOC, DOCX, TXT and MD files are supported");
         }
 
         AppUser user = currentUserService.getCurrentUser();
