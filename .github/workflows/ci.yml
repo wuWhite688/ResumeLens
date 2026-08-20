@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: ["main"]
 
-# Temporary write permission is used only to repair this PR's cross-platform
-# npm lockfile. This helper will be reverted after the corrected lockfile is
-# committed back to the PR branch.
-permissions:
-  contents: write
-
 # 同一分支上新的推送会取消仍在排队的旧运行，避免浪费 runner 时间
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -55,11 +49,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          # For pull requests, work on the actual head commit instead of
-          # GitHub's synthetic merge commit so a generated lockfile commit can
-          # fast-forward the PR branch.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # package.json 的 engines 要求 >=22.13.0；测试脚本用到
       # node --experimental-strip-types 直接执行 .ts 测试文件
@@ -69,29 +58,6 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: jd-rag-resume-frontend/package-lock.json
-
-      # The lockfile was generated on Windows and missed two nested optional
-      # wasm dependencies required by Rolldown on a clean Linux install.
-      # Re-resolve package-lock only (no node_modules install yet), commit the
-      # corrected lock back to this same-repository PR branch, then verify with
-      # the normal strict npm ci step below.
-      - name: 修复跨平台 lockfile
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        working-directory: jd-rag-resume-frontend
-        run: npm install --package-lock-only --ignore-scripts
-
-      - name: 提交修复后的 lockfile
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          if git diff --quiet -- jd-rag-resume-frontend/package-lock.json; then
-            echo "package-lock.json already synchronized"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add jd-rag-resume-frontend/package-lock.json
-          git commit -m "chore: sync frontend package lock"
-          git push origin HEAD:${{ github.head_ref }}
 
       - name: 安装依赖
         working-directory: jd-rag-resume-frontend
