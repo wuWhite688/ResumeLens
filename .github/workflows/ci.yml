@@ -55,6 +55,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # For pull requests, work on the actual head commit instead of
+          # GitHub's synthetic merge commit so a generated lockfile commit can
+          # fast-forward the PR branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # package.json 的 engines 要求 >=22.13.0；测试脚本用到
       # node --experimental-strip-types 直接执行 .ts 测试文件
