@@ -51,7 +51,7 @@
 
 - **账号**：注册 / 登录、BCrypt 密码、JWT 无状态鉴权、按用户隔离数据；登录/注册有基础频率限制
 - **简历**：文本创建或文件上传（每用户最多 30 份、已存文件合计 200MB）、列表检索、编辑、删除（含上传文件与 Lucene 向量清理）
-- **职位 JD**：创建、编辑、删除、**JSON 批量导入**（前端入口 + `POST /api/job-descriptions/import`）
+- **职位 JD**：创建、编辑、删除、**JSON 批量导入**（前端入口 + `POST /api/job-descriptions/import`，每用户最多 200 条）
 - **独立详情页**：`/resumes/[id]`、`/jobs/[id]`（查看 / 编辑 / 删除，复用已有 GET/PUT/DELETE）
 - **智能匹配**：异步分析任务（同一简历+JD 的 PENDING 去重；每用户最多 2 条进行中、10 分钟 10 次）；Hybrid RAG 召回证据；硬技能覆盖与服务端分数上限
 - **可解释报告**：匹配分、优势 / 缺口 / 建议 / 面试题、chunk 级证据与 `[chunk-N]` 引用
@@ -334,7 +334,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | POST | `/api/resumes/upload` | multipart 上传（计入 30 份 / 200MB 配额） |
 | GET/PUT/DELETE | `/api/resumes/{id}` | 详情（含 `rawText`）/ 更新 / 删除 |
 | GET/POST | `/api/job-descriptions` | 列表（`size` 最大 50）/ 创建 |
-| POST | `/api/job-descriptions/import` | 批量导入 |
+| POST | `/api/job-descriptions/import` | 批量导入（单次最多 50 条，计入 200 条配额）|
 | GET/PUT/DELETE | `/api/job-descriptions/{id}` | 详情 / 更新 / 删除 |
 | POST | `/api/analysis-histories/ai` | 异步启动 AI 匹配（立即返回 PENDING；超限 429） |
 | GET | `/api/analysis-histories` / `{id}` | 历史与轮询（列表 `size` 最大 50） |
@@ -362,6 +362,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | `app.analysis.max-submits-per-window` | 默认 10 次 / 10 分钟 |
 | `app.upload.max-resumes-per-user` | 默认 30 |
 | `app.upload.max-stored-bytes-per-user` | 默认 200MB |
+| `app.job-description.max-per-user` | 默认 200 |
 
 **安全提示**：当前配置面向本地演示；公开仓库前请移除真实密钥，改用环境变量或外部配置。
 
