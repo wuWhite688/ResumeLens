@@ -1,5 +1,7 @@
 # ResumeLens · JD-RAG Resume Matching
 
+[![CI](https://github.com/wuWhite688/ResumeLens/actions/workflows/ci.yml/badge.svg)](https://github.com/wuWhite688/ResumeLens/actions/workflows/ci.yml)
+
 基于 **本地向量检索 + 大模型生成** 的简历 / 职位（JD）智能匹配系统。
 
 后端用 Spring Boot 完成鉴权、持久化、异步分析与 Hybrid RAG；前端 ResumeLens 工作台覆盖「录入 → 匹配 → 证据链报告 → 导出」完整闭环。适合作为 Java 后端 + RAG 工程化作品集项目。
