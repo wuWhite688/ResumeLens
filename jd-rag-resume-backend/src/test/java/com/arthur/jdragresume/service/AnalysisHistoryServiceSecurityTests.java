@@ -167,7 +167,9 @@ class AnalysisHistoryServiceSecurityTests {
         ) {
             super(
                     proxy(JobDescriptionRepository.class, (ignored, method, args) -> null),
-                    currentUserService
+                    currentUserService,
+                    proxy(AppUserRepository.class, (ignored, method, args) -> null),
+                    200
             );
             this.jobDescription = jobDescription;
         }

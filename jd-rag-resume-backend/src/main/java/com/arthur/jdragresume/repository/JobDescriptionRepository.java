@@ -10,6 +10,8 @@ import java.util.Optional;
 public interface JobDescriptionRepository extends JpaRepository<JobDescription, Long> {
     Optional<JobDescription> findByIdAndUserId(Long id, Long userId);
 
+    long countByUserId(Long userId);
+
     Page<JobDescription> findByUserIdAndTitleContainingIgnoreCaseOrUserIdAndCompanyNameContainingIgnoreCase(
             Long userIdForTitle,
             String titleKeyword,

@@ -164,7 +164,11 @@ class ResumeDeleteCascadeMySqlTests {
                 );
                 JobDescriptionService service = new JobDescriptionService(
                         repository,
-                        new FixedCurrentUserService(rows.user())
+                        new FixedCurrentUserService(rows.user()),
+                        proxy(AppUserRepository.class, (ignored, method, args) -> {
+                            throw new UnsupportedOperationException("Unexpected repository call: " + method.getName());
+                        }),
+                        200
                 );
                 MockMvc mockMvc = MockMvcBuilders
                         .standaloneSetup(new JobDescriptionController(service))
