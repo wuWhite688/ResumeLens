@@ -152,6 +152,8 @@ public class ResumeService {
             if (stored) {
                 deleteFile(storedPath);
             }
+            // 原始异常此前被整个吞掉：磁盘满、权限不足、路径不可写在日志里毫无痕迹
+            log.error("Failed to store resume file for user {} at {}", user.getId(), storedPath, ex);
             throw new BusinessException("FILE_SAVE_FAILED", "failed to save resume file");
         }
     }
