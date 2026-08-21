@@ -1,7 +1,9 @@
 package com.arthur.jdragresume.exception;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -29,6 +31,48 @@ class GlobalExceptionHandlerTests {
         assertEquals(
                 HttpStatus.CONFLICT,
                 handler.handleBusiness(new BusinessException("ANALYSIS_ALREADY_PENDING", "running")).getStatusCode()
+        );
+    }
+
+    @Test
+    void accountConflictMatchesTheUniqueConstraintPath() {
+        // 串行注册走应用层查重，并发注册走 uk_app_user_username / uk_app_user_email，
+        // 是同一件事的两条路径，状态码必须一致
+        HttpStatusCode viaApplicationCheck =
+                handler.handleBusiness(new BusinessException("ACCOUNT_CONFLICT", "taken")).getStatusCode();
+        HttpStatusCode viaUniqueConstraint =
+                handler.handleDataIntegrity(new DataIntegrityViolationException("duplicate key")).getStatusCode();
+
+        assertEquals(HttpStatus.CONFLICT, viaApplicationCheck);
+        assertEquals(viaUniqueConstraint, viaApplicationCheck);
+    }
+
+    @Test
+    void mapsFullAnalysisQueueTo503() {
+        // 消息是 "please retry later"，状态码若为 400 会让重试与熔断策略失去依据
+        assertEquals(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                handler.handleBusiness(new BusinessException("ANALYSIS_QUEUE_FULL", "queue is full")).getStatusCode()
+        );
+    }
+
+    @Test
+    void mapsFileSaveFailureTo500() {
+        assertEquals(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                handler.handleBusiness(new BusinessException("FILE_SAVE_FAILED", "disk is full")).getStatusCode()
+        );
+    }
+
+    @Test
+    void stillMapsGenuineClientErrorsTo400() {
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                handler.handleBusiness(new BusinessException("UNSUPPORTED_FILE_TYPE", "nope")).getStatusCode()
+        );
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                handler.handleBusiness(new BusinessException("RESUME_TEXT_EMPTY", "empty")).getStatusCode()
         );
     }
 }

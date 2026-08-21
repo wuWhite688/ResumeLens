@@ -27,10 +27,16 @@ public class GlobalExceptionHandler {
         HttpStatus status = switch (ex.getCode()) {
             case "REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_REUSED" -> HttpStatus.UNAUTHORIZED;
             case "AUTH_RATE_LIMITED", "ANALYSIS_RATE_LIMITED", "ANALYSIS_TOO_MANY_PENDING" -> HttpStatus.TOO_MANY_REQUESTS;
-            case "ANALYSIS_ALREADY_PENDING" -> HttpStatus.CONFLICT;
+            // ACCOUNT_CONFLICT 必须与 DataIntegrityViolationException 同为 409：
+            // 串行注册被应用层查重拦下、并发注册被唯一约束拦下，是同一件事的两条路径。
+            case "ANALYSIS_ALREADY_PENDING", "ACCOUNT_CONFLICT" -> HttpStatus.CONFLICT;
             case "AI_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
+            // 队列满是服务端暂时容纳不下，客户端应当稍后重试；落到 400 会与
+            // "please retry later" 的提示自相矛盾，也让重试与熔断策略失去依据。
             case "AI_NOT_CONFIGURED", "AI_RATE_LIMITED", "AI_SERVICE_UNAVAILABLE",
-                 "RAG_EMBEDDING_FAILED", "RAG_RETRIEVAL_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
+                 "RAG_EMBEDDING_FAILED", "RAG_RETRIEVAL_FAILED", "ANALYSIS_QUEUE_FULL" -> HttpStatus.SERVICE_UNAVAILABLE;
+            // 落盘失败是服务端故障，不是请求有问题
+            case "FILE_SAVE_FAILED" -> HttpStatus.INTERNAL_SERVER_ERROR;
             case "AI_AUTH_FAILED", "AI_BALANCE_INSUFFICIENT", "AI_REQUEST_FAILED",
                  "AI_REQUEST_ERROR", "AI_REQUEST_INTERRUPTED", "AI_RESPONSE_EMPTY",
                  "AI_RESPONSE_PARSE_FAILED" -> HttpStatus.BAD_GATEWAY;

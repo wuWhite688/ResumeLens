@@ -327,7 +327,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/auth/register` | 注册（同 IP 有频率限制；用户名/邮箱冲突返回同一错误码） |
+| POST | `/api/auth/register` | 注册（同 IP 有频率限制；用户名/邮箱冲突返回同一错误码，409） |
 | POST | `/api/auth/login` | 登录，返回 JWT（同 IP+用户名有频率限制） |
 | GET/PUT | `/api/users/me` | 当前用户 |
 | GET/POST | `/api/resumes` | 列表（不含 `rawText`，`size` 最大 50）/ 文本创建 |
