@@ -101,6 +101,11 @@ class ResumeDeleteCascadeMySqlTests {
                             resumeRepository,
                             resumeChunkRepository,
                             currentUserService,
+                            proxy(AppUserRepository.class, (ignored, method, args) -> {
+                                throw new UnsupportedOperationException(
+                                        "Unexpected repository call: " + method.getName()
+                                );
+                            }),
                             null,
                             tempDir.resolve("uploads").toString(),
                             vectorIndex

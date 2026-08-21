@@ -25,6 +25,8 @@ services:
       DB_USERNAME: jd_app
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in compose.env}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in compose.env}
+      # false keeps http://127.0.0.1:3000 login working. Set true for HTTPS.
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
       AI_MOCK_ENABLED: ${AI_MOCK_ENABLED:-true}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}

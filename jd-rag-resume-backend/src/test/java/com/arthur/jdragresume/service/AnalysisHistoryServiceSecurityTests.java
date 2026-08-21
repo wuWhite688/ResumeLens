@@ -144,6 +144,7 @@ class AnalysisHistoryServiceSecurityTests {
                     proxy(ResumeRepository.class, (ignored, method, args) -> null),
                     proxy(ResumeChunkRepository.class, (ignored, method, args) -> null),
                     currentUserService,
+                    proxy(AppUserRepository.class, (ignored, method, args) -> null),
                     null,
                     "unused",
                     null

@@ -8,7 +8,7 @@ export type Resume = {
   candidateName: string;
   phone?: string;
   email?: string;
-  rawText: string;
+  rawText?: string;
   originalFileName?: string;
   contentType?: string;
   fileExtension?: string;

@@ -3,12 +3,15 @@ package com.arthur.jdragresume.service;
 import com.arthur.jdragresume.exception.BusinessException;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.exception.WriteLimitReachedException;
+import org.apache.tika.extractor.EmbeddedDocumentExtractor;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
+import org.apache.tika.parser.AutoDetectParserConfig;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.sax.BodyContentHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
 import java.io.IOException;
@@ -22,11 +25,34 @@ public class ResumeTextExtractor {
     static final int MAX_RAW_TEXT_CHARS = 200_000;
     private static final Set<String> PLAIN_TEXT_EXTENSIONS = Set.of("txt", "md");
 
-    private final AutoDetectParser parser = new AutoDetectParser();
+    private static final EmbeddedDocumentExtractor SKIP_EMBEDDED = new EmbeddedDocumentExtractor() {
+        @Override
+        public boolean shouldParseEmbedded(Metadata metadata) {
+            return false;
+        }
+
+        @Override
+        public void parseEmbedded(
+                InputStream stream,
+                ContentHandler handler,
+                Metadata metadata,
+                boolean outputHtml
+        ) {
+            // Resume matching only needs the outer document text.
+        }
+    };
+
+    private final AutoDetectParser parser;
     private final ResumeTextQualityValidator qualityValidator;
 
     public ResumeTextExtractor(ResumeTextQualityValidator qualityValidator) {
         this.qualityValidator = qualityValidator;
+        AutoDetectParser autoDetectParser = new AutoDetectParser();
+        AutoDetectParserConfig config = new AutoDetectParserConfig();
+        config.setMaximumDepth(4);
+        config.setMaximumPackageEntryDepth(2);
+        autoDetectParser.setAutoDetectParserConfig(config);
+        this.parser = autoDetectParser;
     }
 
     public String extract(MultipartFile file) {
@@ -62,6 +88,7 @@ public class ResumeTextExtractor {
             BodyContentHandler handler = new BodyContentHandler(MAX_RAW_TEXT_CHARS);
             Metadata metadata = new Metadata();
             ParseContext context = new ParseContext();
+            context.set(EmbeddedDocumentExtractor.class, SKIP_EMBEDDED);
             parser.parse(inputStream, handler, metadata, context);
             return handler.toString();
         }

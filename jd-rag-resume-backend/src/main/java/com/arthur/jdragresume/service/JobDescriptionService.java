@@ -9,7 +9,7 @@ import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
-import org.springframework.data.domain.PageRequest;
+import com.arthur.jdragresume.common.PageRequests;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +33,7 @@ public class JobDescriptionService {
     public PageResponse<JobDescriptionResponse> findAll(int page, int size, String keyword) {
         AppUser user = currentUserService.getCurrentUser();
         String safeKeyword = normalizeKeyword(keyword);
-        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageRequest = PageRequests.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return PageResponse.from(jobDescriptionRepository
                 .findByUserIdAndTitleContainingIgnoreCaseOrUserIdAndCompanyNameContainingIgnoreCase(
                         user.getId(),

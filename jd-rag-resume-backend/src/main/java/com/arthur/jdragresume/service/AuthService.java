@@ -21,6 +21,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
     private final RefreshTokenService refreshTokenService;
+    private final String dummyPasswordHash;
 
     public AuthService(
             AppUserRepository appUserRepository,
@@ -34,15 +35,14 @@ public class AuthService {
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
         this.refreshTokenService = refreshTokenService;
+        this.dummyPasswordHash = passwordEncoder.encode("resume-lens-timing-dummy");
     }
 
     @Transactional
     public AuthSession register(RegisterRequest request) {
-        if (appUserRepository.existsByUsername(request.username())) {
-            throw new BusinessException("USERNAME_EXISTS", "username already exists");
-        }
-        if (appUserRepository.existsByEmail(request.email())) {
-            throw new BusinessException("EMAIL_EXISTS", "email already exists");
+        if (appUserRepository.existsByUsername(request.username())
+                || appUserRepository.existsByEmail(request.email())) {
+            throw new BusinessException("ACCOUNT_CONFLICT", "an account with that username or email already exists");
         }
 
         AppUser user = new AppUser();
@@ -57,9 +57,11 @@ public class AuthService {
 
     @Transactional
     public AuthSession login(LoginRequest request) {
-        AppUser user = appUserRepository.findByUsername(request.username())
-                .orElseThrow(() -> new BadCredentialsException("username or password is incorrect"));
-
+        AppUser user = appUserRepository.findByUsername(request.username()).orElse(null);
+        if (user == null) {
+            passwordEncoder.matches(request.password(), dummyPasswordHash);
+            throw new BadCredentialsException("username or password is incorrect");
+        }
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new BadCredentialsException("username or password is incorrect");
         }

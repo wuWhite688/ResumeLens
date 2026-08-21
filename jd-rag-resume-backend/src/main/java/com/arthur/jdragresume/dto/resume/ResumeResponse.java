@@ -21,6 +21,14 @@ public record ResumeResponse(
         LocalDateTime updatedAt
 ) {
     public static ResumeResponse from(Resume resume) {
+        return from(resume, true);
+    }
+
+    public static ResumeResponse summary(Resume resume) {
+        return from(resume, false);
+    }
+
+    private static ResumeResponse from(Resume resume, boolean includeRawText) {
         return new ResumeResponse(
                 resume.getId(),
                 resume.getUser().getId(),
@@ -33,7 +41,7 @@ public record ResumeResponse(
                 resume.getContentType(),
                 resume.getFileExtension(),
                 resume.getFileSize(),
-                resume.getRawText(),
+                includeRawText ? resume.getRawText() : null,
                 resume.getCreatedAt(),
                 resume.getUpdatedAt()
         );
