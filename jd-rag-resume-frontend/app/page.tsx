@@ -36,7 +36,7 @@ import {
   reportFilename,
 } from "./report-export";
 import { analysisPollTimeoutMs, pollAnalysisUntilSettled } from "./analysis-poll";
-import { appendResumeUploadFields, prepareResumeUploadDraft } from "./resume-upload";
+import { appendResumeUploadFields, prepareResumeUploadDraft, resumeFormFrom } from "./resume-upload";
 
 const EMPTY_RESUME_FORM = {
   title: "",
@@ -303,18 +303,21 @@ export default function Home() {
     setResumeForm((current) => prepareResumeUploadDraft(current, nextFile.name));
   }
 
-  function beginEditResume(item: Resume) {
-    setEditingResumeId(item.id);
-    setFile(null);
-    setResumeForm({
-      title: item.title || "",
-      candidateName: item.candidateName || "",
-      phone: item.phone || "",
-      email: item.email || "",
-      rawText: item.rawText || "",
-    });
-    setSelectedResumeId(item.id);
-    setNotice(`正在编辑简历 #${item.id}，保存后将更新并失效旧向量索引`);
+  async function beginEditResume(item: Resume) {
+    setBusy("resume-edit");
+    setError("");
+    try {
+      const detail = await apiRequest<Resume>(`/api/resumes/${item.id}`);
+      setEditingResumeId(detail.id);
+      setFile(null);
+      setResumeForm(resumeFormFrom(detail));
+      setSelectedResumeId(detail.id);
+      setNotice(`正在编辑简历 #${detail.id}，保存后将更新并失效旧向量索引`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "加载简历失败");
+    } finally {
+      setBusy("");
+    }
   }
 
   function beginEditJob(item: Job) {
@@ -719,7 +722,7 @@ export default function Home() {
                     </button>
                     <div className="entity-actions">
                       <Link className="ghost compact" href={`/resumes/${item.id}`}>详情</Link>
-                      <button type="button" className="ghost compact" onClick={() => beginEditResume(item)} disabled={!!busy}>编辑</button>
+                      <button type="button" className="ghost compact" onClick={() => void beginEditResume(item)} disabled={!!busy}>编辑</button>
                       <button type="button" className="ghost compact danger" onClick={() => void deleteResume(item.id)} disabled={!!busy}>删除</button>
                     </div>
                   </div>

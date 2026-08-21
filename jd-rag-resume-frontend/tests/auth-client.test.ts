@@ -6,7 +6,7 @@ import {
   refreshSession,
   setAccessToken,
 } from "../app/lib/api.ts";
-import { POST as proxyPost } from "../app/api/backend/[...path]/route.ts";
+import { POST as proxyPost, rewriteUpstreamCookie } from "../app/api/backend/[...path]/route.ts";
 
 const session = {
   tokenType: "Bearer" as const,
@@ -90,4 +90,12 @@ test("the backend proxy rewrites the refresh cookie path for the browser route",
     response.headers.get("set-cookie") || "",
     /Path=\/api\/backend\/api\/auth(?:;|$)/,
   );
+});
+
+test("the backend proxy adds Secure on HTTPS but leaves local HTTP cookies intact", () => {
+  const cookie = "jd-rag-refresh=opaque; Path=/api/auth; HttpOnly; SameSite=Lax";
+  const httpCookie = rewriteUpstreamCookie(cookie, new URL("http://127.0.0.1:3000/api/backend/api/auth/login"));
+  const httpsCookie = rewriteUpstreamCookie(cookie, new URL("https://example.com/api/backend/api/auth/login"));
+  assert.equal(httpCookie.includes("Secure"), false);
+  assert.match(httpsCookie, /;\s*Secure/);
 });

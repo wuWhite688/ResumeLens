@@ -6,6 +6,22 @@ export type ResumeUploadDraft = {
   rawText: string;
 };
 
+export function resumeFormFrom(resume: {
+  title?: string;
+  candidateName?: string;
+  phone?: string;
+  email?: string;
+  rawText?: string;
+}): ResumeUploadDraft {
+  return {
+    title: resume.title || "",
+    candidateName: resume.candidateName || "",
+    phone: resume.phone || "",
+    email: resume.email || "",
+    rawText: resume.rawText || "",
+  };
+}
+
 export function prepareResumeUploadDraft<T extends ResumeUploadDraft>(current: T, fileName: string): T {
   return {
     ...current,

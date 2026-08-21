@@ -7,12 +7,13 @@ import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
+import com.arthur.jdragresume.common.PageRequests;
+import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
 import com.arthur.jdragresume.repository.ResumeChunkRepository;
 import com.arthur.jdragresume.rag.LuceneVectorIndex;
 import com.arthur.jdragresume.security.CurrentUserService;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,14 +37,20 @@ public class ResumeService {
     private final ResumeRepository resumeRepository;
     private final ResumeChunkRepository resumeChunkRepository;
     private final CurrentUserService currentUserService;
+    private final AppUserRepository appUserRepository;
     private final ResumeTextExtractor resumeTextExtractor;
     private final Path resumeUploadDir;
     private final LuceneVectorIndex vectorIndex;
+    @Value("${app.upload.max-resumes-per-user:30}")
+    private int maxResumesPerUser = 30;
+    @Value("${app.upload.max-stored-bytes-per-user:209715200}")
+    private long maxStoredBytesPerUser = 209_715_200L;
 
     public ResumeService(
             ResumeRepository resumeRepository,
             ResumeChunkRepository resumeChunkRepository,
             CurrentUserService currentUserService,
+            AppUserRepository appUserRepository,
             ResumeTextExtractor resumeTextExtractor,
             @Value("${app.upload.resume-dir:uploads/resumes}") String resumeUploadDir,
             LuceneVectorIndex vectorIndex
@@ -51,6 +58,7 @@ public class ResumeService {
         this.resumeRepository = resumeRepository;
         this.resumeChunkRepository = resumeChunkRepository;
         this.currentUserService = currentUserService;
+        this.appUserRepository = appUserRepository;
         this.resumeTextExtractor = resumeTextExtractor;
         this.resumeUploadDir = Path.of(resumeUploadDir);
         this.vectorIndex = vectorIndex;
@@ -60,7 +68,7 @@ public class ResumeService {
     public PageResponse<ResumeResponse> findAll(int page, int size, String keyword) {
         AppUser user = currentUserService.getCurrentUser();
         String safeKeyword = normalizeKeyword(keyword);
-        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageRequest = PageRequests.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return PageResponse.from(resumeRepository
                 .findByUserIdAndTitleContainingIgnoreCaseOrUserIdAndCandidateNameContainingIgnoreCase(
                         user.getId(),
@@ -69,7 +77,7 @@ public class ResumeService {
                         safeKeyword,
                         pageRequest
                 )
-                .map(ResumeResponse::from));
+                .map(ResumeResponse::summary));
     }
 
     @Transactional(readOnly = true)
@@ -79,8 +87,10 @@ public class ResumeService {
 
     @Transactional
     public ResumeResponse create(ResumeRequest request) {
+        AppUser user = lockCurrentUser();
+        enforceResumeCount(user);
         Resume resume = new Resume();
-        resume.setUser(currentUserService.getCurrentUser());
+        resume.setUser(user);
         applyRequest(resume, request);
         return ResumeResponse.from(resumeRepository.save(resume));
     }
@@ -106,32 +116,44 @@ public class ResumeService {
 
         validateUploadMetadata(title, candidateName, email);
 
-        AppUser user = currentUserService.getCurrentUser();
+        String parsedRawText = limitRawText(resolveRawText(file, rawText));
+        AppUser user = lockCurrentUser();
+        enforceResumeCount(user);
+        enforceStoredBytes(user, file.getSize());
         Path userDir = resumeUploadDir.resolve(user.getId().toString());
         String storedName = UUID.randomUUID() + "." + extension;
         Path storedPath = userDir.resolve(storedName);
-        String parsedRawText = limitRawText(resolveRawText(file, rawText));
 
+        boolean stored = false;
         try {
             Files.createDirectories(userDir);
             file.transferTo(storedPath);
+            stored = true;
+
+            Resume resume = new Resume();
+            resume.setUser(user);
+            resume.setTitle(isBlank(title) ? truncate(originalFileName, 120) : title.trim());
+            resume.setCandidateName(candidateName);
+            resume.setPhone(phone);
+            resume.setEmail(email);
+            resume.setOriginalFileName(originalFileName);
+            resume.setContentType(file.getContentType());
+            resume.setFileExtension(extension);
+            resume.setStoredFilePath(storedPath.toString());
+            resume.setFileSize(file.getSize());
+            resume.setRawText(parsedRawText);
+            return ResumeResponse.from(resumeRepository.save(resume));
+        } catch (BusinessException ex) {
+            if (stored) {
+                deleteFile(storedPath);
+            }
+            throw ex;
         } catch (Exception ex) {
+            if (stored) {
+                deleteFile(storedPath);
+            }
             throw new BusinessException("FILE_SAVE_FAILED", "failed to save resume file");
         }
-
-        Resume resume = new Resume();
-        resume.setUser(user);
-        resume.setTitle(isBlank(title) ? truncate(originalFileName, 120) : title.trim());
-        resume.setCandidateName(candidateName);
-        resume.setPhone(phone);
-        resume.setEmail(email);
-        resume.setOriginalFileName(originalFileName);
-        resume.setContentType(file.getContentType());
-        resume.setFileExtension(extension);
-        resume.setStoredFilePath(storedPath.toString());
-        resume.setFileSize(file.getSize());
-        resume.setRawText(parsedRawText);
-        return ResumeResponse.from(resumeRepository.save(resume));
     }
 
     @Transactional
@@ -171,6 +193,31 @@ public class ResumeService {
         resume.setPhone(request.phone());
         resume.setEmail(request.email());
         resume.setRawText(limitRawText(request.rawText()));
+    }
+
+    private AppUser lockCurrentUser() {
+        AppUser user = currentUserService.getCurrentUser();
+        return appUserRepository.findByIdForUpdate(user.getId())
+                .orElseThrow(() -> new IllegalStateException("current user no longer exists"));
+    }
+
+    private void enforceResumeCount(AppUser user) {
+        if (resumeRepository.countByUserId(user.getId()) >= maxResumesPerUser) {
+            throw new BusinessException(
+                    "RESUME_QUOTA_EXCEEDED",
+                    "resume count exceeds the maximum of " + maxResumesPerUser
+            );
+        }
+    }
+
+    private void enforceStoredBytes(AppUser user, long incomingBytes) {
+        long used = resumeRepository.sumFileSizeByUserId(user.getId());
+        if (used + Math.max(0L, incomingBytes) > maxStoredBytesPerUser) {
+            throw new BusinessException(
+                    "RESUME_STORAGE_QUOTA_EXCEEDED",
+                    "stored resume files exceed the maximum of " + maxStoredBytesPerUser + " bytes"
+            );
+        }
     }
 
     private void validateUploadMetadata(String title, String candidateName, String email) {

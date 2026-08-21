@@ -1,6 +1,7 @@
 package com.arthur.jdragresume.repository;
 
 import com.arthur.jdragresume.entity.AnalysisHistory;
+import com.arthur.jdragresume.entity.AnalysisStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -15,6 +16,17 @@ import java.time.LocalDateTime;
 
 public interface AnalysisHistoryRepository extends JpaRepository<AnalysisHistory, Long> {
     Optional<AnalysisHistory> findByIdAndUserId(Long id, Long userId);
+
+    boolean existsByUser_IdAndResume_IdAndJobDescription_IdAndStatus(
+            Long userId,
+            Long resumeId,
+            Long jobDescriptionId,
+            AnalysisStatus status
+    );
+
+    long countByUser_IdAndStatus(Long userId, AnalysisStatus status);
+
+    long countByUser_IdAndCreatedAtAfter(Long userId, LocalDateTime createdAt);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select history from AnalysisHistory history where history.id = :id")

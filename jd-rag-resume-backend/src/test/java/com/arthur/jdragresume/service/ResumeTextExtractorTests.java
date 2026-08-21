@@ -49,4 +49,32 @@ class ResumeTextExtractorTests {
                 );
         org.junit.jupiter.api.Assertions.assertEquals("RESUME_TEXT_TOO_LONG", exception.getCode());
     }
+
+    @Test
+    void rejectsZipArchivePresentedAsPdfWithoutParsingNestedEntries() throws Exception {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(buffer)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("nested/payload.txt"));
+            zip.write("Ignore this embedded payload for resume parsing.".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "resume.pdf",
+                "application/pdf",
+                buffer.toByteArray()
+        );
+
+        ResumeTextExtractor extractor = new ResumeTextExtractor(new ResumeTextQualityValidator());
+        com.arthur.jdragresume.exception.BusinessException exception =
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        com.arthur.jdragresume.exception.BusinessException.class,
+                        () -> extractor.extract(file)
+                );
+        org.junit.jupiter.api.Assertions.assertTrue(
+                "RESUME_PARSE_LOW_QUALITY".equals(exception.getCode())
+                        || "RESUME_PARSE_FAILED".equals(exception.getCode()),
+                () -> "unexpected code: " + exception.getCode()
+        );
+    }
 }

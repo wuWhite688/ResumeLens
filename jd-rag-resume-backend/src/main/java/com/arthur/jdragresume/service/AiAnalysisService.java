@@ -20,6 +20,7 @@ public class AiAnalysisService {
     private final ResumeService resumeService;
     private final JobDescriptionService jobDescriptionService;
     private final AnalysisHistoryRepository analysisHistoryRepository;
+    private final AnalysisSubmitGuard analysisSubmitGuard;
     private final AiAnalysisWorker aiAnalysisWorker;
     private final TaskExecutor analysisTaskExecutor;
 
@@ -28,6 +29,7 @@ public class AiAnalysisService {
             ResumeService resumeService,
             JobDescriptionService jobDescriptionService,
             AnalysisHistoryRepository analysisHistoryRepository,
+            AnalysisSubmitGuard analysisSubmitGuard,
             AiAnalysisWorker aiAnalysisWorker,
             @Qualifier("analysisTaskExecutor") TaskExecutor analysisTaskExecutor
     ) {
@@ -35,6 +37,7 @@ public class AiAnalysisService {
         this.resumeService = resumeService;
         this.jobDescriptionService = jobDescriptionService;
         this.analysisHistoryRepository = analysisHistoryRepository;
+        this.analysisSubmitGuard = analysisSubmitGuard;
         this.aiAnalysisWorker = aiAnalysisWorker;
         this.analysisTaskExecutor = analysisTaskExecutor;
     }
@@ -47,13 +50,7 @@ public class AiAnalysisService {
             throw new BusinessException("RESUME_TEXT_EMPTY", "resume rawText is empty");
         }
 
-        AnalysisHistory history = new AnalysisHistory();
-        history.setUser(user);
-        history.setResume(resume);
-        history.setJobDescription(jobDescription);
-        history.setStatus(AnalysisStatus.PENDING);
-        history.setSummary("AI analysis is pending");
-        AnalysisHistory saved = analysisHistoryRepository.save(history);
+        AnalysisHistory saved = analysisSubmitGuard.admit(user, resume, jobDescription);
         try {
             analysisTaskExecutor.execute(() -> aiAnalysisWorker.process(saved.getId()));
         } catch (RuntimeException ex) {

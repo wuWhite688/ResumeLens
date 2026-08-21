@@ -26,6 +26,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
         HttpStatus status = switch (ex.getCode()) {
             case "REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_REUSED" -> HttpStatus.UNAUTHORIZED;
+            case "AUTH_RATE_LIMITED", "ANALYSIS_RATE_LIMITED", "ANALYSIS_TOO_MANY_PENDING" -> HttpStatus.TOO_MANY_REQUESTS;
+            case "ANALYSIS_ALREADY_PENDING" -> HttpStatus.CONFLICT;
             case "AI_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
             case "AI_NOT_CONFIGURED", "AI_RATE_LIMITED", "AI_SERVICE_UNAVAILABLE",
                  "RAG_EMBEDDING_FAILED", "RAG_RETRIEVAL_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;

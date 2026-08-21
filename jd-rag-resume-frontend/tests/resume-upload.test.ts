@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFile } from "node:fs/promises";
-import { appendResumeUploadFields, prepareResumeUploadDraft } from "../app/resume-upload.ts";
+import { appendResumeUploadFields, prepareResumeUploadDraft, resumeFormFrom } from "../app/resume-upload.ts";
 
 test("selecting a PDF clears sample rawText so the backend extracts the uploaded file", () => {
   const draft = prepareResumeUploadDraft({
@@ -53,4 +53,21 @@ test("workbench disables the rawText field while a file is attached", async () =
   const pageSrc = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(pageSrc, /disabled=\{\!\!file && !editingResumeId\}/);
   assert.doesNotMatch(pageSrc, /nextFile\.text\(\)/);
+});
+
+test("list-to-editor form does not invent resume text when rawText is omitted", () => {
+  const form = resumeFormFrom({
+    title: "Backend resume",
+    candidateName: "Arthur",
+    phone: "123",
+    email: "a@example.com",
+  });
+  assert.equal(form.rawText, "");
+  assert.equal(form.title, "Backend resume");
+});
+
+test("workbench reloads resume detail before editing so list DTO can omit rawText", async () => {
+  const pageSrc = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(pageSrc, /apiRequest<Resume>\(`\/api\/resumes\/\$\{item\.id\}`\)/);
+  assert.match(pageSrc, /resumeFormFrom\(detail\)/);
 });
