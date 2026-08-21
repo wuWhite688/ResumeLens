@@ -295,7 +295,9 @@ sudo docker info >/dev/null
 sg docker -c './mvnw test'
 ```
 
-完整验收应看到 `ResumeDeleteCascadeMySqlTests` 为 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0`，总汇总为 `Tests run: 28, Failures: 0, Errors: 0, Skipped: 1`（仅跳过真实 embedding 回归）。
+完整验收应看到 `ResumeDeleteCascadeMySqlTests` 为 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0`（两条 MySQL 级联用例都真实执行），总汇总为 `Failures: 0, Errors: 0`，且**跳过项只剩三条**：真实 embedding 回归（`RUN_EMBEDDING_REGRESSION`）与两条阈值扫描实验（`RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP`）。
+
+用例总数会随测试增补而变化，因此这里不写死具体数字 —— 验收依据是 `Skipped` 的**构成**，而不是总数。
 
 ### 3. 前端
 
@@ -381,7 +383,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 - UI 通过 Actuator 实时探测**后端健康**；DeepSeek / 兼容模型是否可用仍以实际分析请求为准  
 - 旧的 Hibernate 建表数据库会由 Flyway baseline 为 V1；新数据库直接执行版本化迁移  
 - Compose 首次启动需下载本地 GTE 模型，耗时取决于网络  
-- `RealEmbeddingRegressionTests` 默认跳过，需环境变量开启  
+- `RealEmbeddingRegressionTests` 与 `ThresholdSweepExperimentTests` 默认跳过，需环境变量开启（`RUN_EMBEDDING_REGRESSION` / `RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP`）  
 
 这些不影响主链路演示；公开部署前仍应继续做密钥外置与运行环境加固。
 
