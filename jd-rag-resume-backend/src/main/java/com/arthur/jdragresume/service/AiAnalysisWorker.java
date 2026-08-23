@@ -59,6 +59,23 @@ public class AiAnalysisWorker {
             String retrievedContext = retrievedContext(chunks);
             List<RetrievedChunk> kept = chunks.stream().filter(RetrievedChunk::kept).toList();
             HardSkillCoverage hardSkills = resumeRagService.assessHardSkills(jobDescription, kept);
+            if (kept.isEmpty()) {
+                boolean completed = historyUpdateService.completeIfPending(historyId, locked -> {
+                    locked.setRetrievedContext(retrievedContext);
+                    locked.setMatchScore(BigDecimal.ZERO.setScale(2));
+                    locked.setSummary("未检索到达到相似度阈值的简历证据，当前简历与岗位缺少可验证的匹配依据。");
+                    locked.setStrengths("未发现可由简历证据验证的岗位匹配优势。");
+                    locked.setMissingSkills(mergeMissingSkills("未检索到可验证的岗位技能证据。", hardSkills));
+                    locked.setImprovementSuggestions("请补充与岗位要求直接相关的技能、项目职责和可核验结果后重新分析。");
+                    locked.setInterviewQuestions("暂无基于当前简历证据的针对性问题；建议先核实候选人是否具备岗位要求的核心技能。");
+                });
+                if (completed) {
+                    log.info("Completed AI analysis {} without an LLM request because no evidence passed the threshold", historyId);
+                } else {
+                    log.info("Skipped stale no-evidence completion for {}", historyId);
+                }
+                return;
+            }
             AiAnalysisResult result = resultParser.parse(aiClient.chat(
                     systemPrompt(),
                     userPrompt(resume, jobDescription, evidenceForPrompt(kept, hardSkills))

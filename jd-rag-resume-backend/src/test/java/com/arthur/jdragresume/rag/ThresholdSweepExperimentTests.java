@@ -21,10 +21,12 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -40,6 +42,9 @@ class ThresholdSweepExperimentTests {
             "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/tokenizer.json";
     private static final String REMOTE_MODEL =
             "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/onnx/model_int8.onnx";
+    private static final List<Integer> ABLATION_CHUNK_SIZES = List.of(600, 900, 1200);
+    private static final List<Integer> ABLATION_TOP_KS = List.of(1, 3, 5);
+    private static final List<Double> ABLATION_THRESHOLDS = List.of(0.65, 0.70, 0.72, 0.75, 0.80);
 
     @Test
     @EnabledIfEnvironmentVariable(named = "RUN_THRESHOLD_SWEEP_PREVIEW", matches = "true")
@@ -277,6 +282,551 @@ class ThresholdSweepExperimentTests {
 
             assertTrue(completed, "sweep must complete");
             assertTrue(Files.size(resultsDir.resolve("threshold-metrics.csv")) > 0);
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "RUN_RAG_ABLATION", matches = "true")
+    @Timeout(value = 40, unit = TimeUnit.MINUTES)
+    void compareFullTextWithRagAcrossConfigurations() throws Exception {
+        Path sweepDir = resolveSweepDir();
+        Path ablationDir = resolveAblationDir(sweepDir);
+        Path logsDir = ablationDir.resolve("logs");
+        Path resultsDir = ablationDir.resolve("results");
+        Files.createDirectories(logsDir);
+        Files.createDirectories(resultsDir);
+
+        ObjectMapper mapper = mapper();
+        DatasetFile dataset = loadDataset(sweepDir, mapper);
+        assertFalse(dataset.pairs().isEmpty());
+
+        Path consoleLog = logsDir.resolve("ablation-console.log");
+        try (PrintStream log = new PrintStream(Files.newOutputStream(consoleLog), true, StandardCharsets.UTF_8)) {
+            log("=== RAG ablation start " + Instant.now() + " ===", log);
+            log("dataset=" + sweepDir.resolve("dataset").toAbsolutePath(), log);
+            log("output=" + ablationDir.toAbsolutePath(), log);
+
+            RagProperties properties = productionProperties();
+            TextChunker chunker = new TextChunker(properties);
+            String tokenizerUri = resolveResource(
+                    "RAG_EMBEDDING_TOKENIZER_URI",
+                    Path.of("models", "gte-multilingual-base-int8", "tokenizer.json"),
+                    REMOTE_TOKENIZER
+            );
+            String modelUri = resolveResource(
+                    "RAG_EMBEDDING_MODEL_URI",
+                    Path.of("models", "gte-multilingual-base-int8", "model_int8.onnx"),
+                    REMOTE_MODEL
+            );
+            assertLocalModelPresent(tokenizerUri, modelUri, log);
+
+            Path luceneDir = Files.createTempDirectory("rag-ablation-lucene");
+            Map<Long, List<ResumeChunk>> chunkStore = new ConcurrentHashMap<>();
+            ResumeChunkRepository repository = inMemoryRepository(chunkStore);
+            ResumeIndexStore indexStore = new ResumeIndexStore(repository);
+            ObjectMapper embeddingMapper = new ObjectMapper();
+            ClsOnnxEmbeddingModel embeddingModel = new ClsOnnxEmbeddingModel(
+                    tokenizerUri,
+                    modelUri,
+                    properties.getModelOutputName(),
+                    Map.of(
+                            "padding", "true",
+                            "truncation", "true",
+                            "modelMaxLength", String.valueOf(properties.getMaxLength()),
+                            "maxLength", String.valueOf(properties.getMaxLength())
+                    ),
+                    properties.getEmbeddingDimensions()
+            );
+
+            List<Map<String, Object>> pairRows = new ArrayList<>();
+            boolean completed = false;
+            try {
+                long loadStarted = System.nanoTime();
+                embeddingModel.afterPropertiesSet();
+                log(String.format(Locale.ROOT, "ONNX model loaded in %.1fs", elapsedSeconds(loadStarted)), log);
+
+                try (LuceneVectorIndex vectorIndex = new LuceneVectorIndex(embeddingMapper, luceneDir.toString())) {
+                    ResumeRagService service = new ResumeRagService(
+                            embeddingModel,
+                            repository,
+                            chunker,
+                            properties,
+                            embeddingMapper,
+                            indexStore,
+                            vectorIndex
+                    );
+                    AppUser user = experimentUser();
+                    Map<String, Resume> resumes = materializeResumes(sweepDir, dataset, user);
+                    Map<String, JobDescription> jobs = materializeJobs(sweepDir, dataset, user);
+
+                    for (int chunkSize : ABLATION_CHUNK_SIZES) {
+                        int chunkOverlap = scaledOverlap(chunkSize);
+                        properties.setChunkSize(chunkSize);
+                        properties.setChunkOverlap(chunkOverlap);
+                        // Retrieve every chunk once. The grid below reapplies the production
+                        // raw-threshold and boosted-order Top-K rules without re-embedding queries.
+                        properties.setTopK(80);
+                        properties.setMinSimilarity(0.0);
+
+                        Map<String, Object> preview = buildChunkPreview(sweepDir, dataset, chunker);
+                        Map<String, List<LabeledChunk>> labeledByPair = labeledChunksByPair(preview);
+                        log("chunkSize=" + chunkSize + " overlap=" + chunkOverlap, log);
+
+                        for (PairSpec pair : dataset.pairs()) {
+                            Resume resume = resumes.get(pair.resumeId());
+                            JobDescription job = jobs.get(pair.jobId());
+                            List<LabeledChunk> labeled = labeledByPair.getOrDefault(pair.id(), List.of());
+                            List<RetrievedChunk> ranked = service.retrieve(user, resume, job);
+                            if (ranked.size() != labeled.size()) {
+                                throw new IllegalStateException(
+                                        "expected every chunk in ablation pair=" + pair.id()
+                                                + " chunkSize=" + chunkSize
+                                                + " labeled=" + labeled.size()
+                                                + " retrieved=" + ranked.size()
+                                );
+                            }
+
+                            pairRows.add(scoreAblationPair(
+                                    "full_text",
+                                    pair,
+                                    labeled,
+                                    ranked,
+                                    chunkSize,
+                                    chunkOverlap,
+                                    0,
+                                    0.0,
+                                    resume.getRawText().length(),
+                                    utf8Bytes(resume.getRawText()),
+                                    resume.getRawText().length(),
+                                    utf8Bytes(resume.getRawText())
+                            ));
+
+                            for (int topK : ABLATION_TOP_KS) {
+                                for (double threshold : ABLATION_THRESHOLDS) {
+                                    List<RetrievedChunk> selected = selectRagEvidence(ranked, topK, threshold);
+                                    String evidence = selected.stream()
+                                            .map(RetrievedChunk::content)
+                                            .collect(java.util.stream.Collectors.joining("\n\n"));
+                                    pairRows.add(scoreAblationPair(
+                                            "rag",
+                                            pair,
+                                            labeled,
+                                            selected,
+                                            chunkSize,
+                                            chunkOverlap,
+                                            topK,
+                                            threshold,
+                                            evidence.length(),
+                                            utf8Bytes(evidence),
+                                            resume.getRawText().length(),
+                                            utf8Bytes(resume.getRawText())
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    List<Map<String, Object>> configRows = aggregateAblation(pairRows);
+                    mapper.writerWithDefaultPrettyPrinter().writeValue(
+                            resultsDir.resolve("pair-metrics.json").toFile(), pairRows
+                    );
+                    mapper.writerWithDefaultPrettyPrinter().writeValue(
+                            resultsDir.resolve("config-metrics.json").toFile(), configRows
+                    );
+                    writeCsv(resultsDir.resolve("pair-metrics.csv"), pairRows, ABLATION_PAIR_CSV_COLUMNS);
+                    writeCsv(resultsDir.resolve("config-metrics.csv"), configRows, ABLATION_CONFIG_CSV_COLUMNS);
+                    Files.writeString(
+                            ablationDir.resolve("RESULTS.md"),
+                            renderAblationReport(configRows, dataset),
+                            StandardCharsets.UTF_8
+                    );
+                    completed = true;
+                    log("wrote " + ablationDir.resolve("RESULTS.md").toAbsolutePath(), log);
+                }
+            } finally {
+                embeddingModel.destroy();
+                deleteRecursively(luceneDir);
+                log("=== RAG ablation end " + Instant.now() + " completed=" + completed + " ===", log);
+            }
+        }
+
+        assertTrue(Files.size(resultsDir.resolve("config-metrics.csv")) > 0);
+        assertTrue(Files.size(ablationDir.resolve("RESULTS.md")) > 0);
+    }
+
+    private static final List<String> ABLATION_PAIR_CSV_COLUMNS = List.of(
+            "strategy", "pairId", "type", "shouldMatch", "resumeId", "jobId",
+            "chunkSize", "chunkOverlap", "topK", "threshold",
+            "chunkCount", "goldRelevant", "selectedChunks", "tp", "fp", "fn",
+            "chunkPrecision", "chunkRecall", "chunkF1", "predictedEvidenceGate", "pairCorrect",
+            "evidenceChars", "evidenceUtf8Bytes", "fullTextChars", "fullTextUtf8Bytes"
+    );
+
+    private static final List<String> ABLATION_CONFIG_CSV_COLUMNS = List.of(
+            "strategy", "productionConfig", "chunkSize", "chunkOverlap", "topK", "threshold", "pairs",
+            "chunkPrecision", "chunkRecall", "chunkF1",
+            "pairPrecision", "pairRecall", "pairF1", "pairAccuracy", "pairTp", "pairFp", "pairFn", "pairTn",
+            "llmRequestsTriggered", "llmRequestReduction",
+            "meanSelectedChunks", "positiveMeanSelectedChunks", "negativeMeanSelectedChunks",
+            "payloadChars", "fullTextChars", "payloadRatio", "payloadReduction",
+            "positivePayloadRatio", "negativePayloadRatio"
+    );
+
+    private static Map<String, Object> scoreAblationPair(
+            String strategy,
+            PairSpec pair,
+            List<LabeledChunk> labeled,
+            List<RetrievedChunk> selected,
+            int chunkSize,
+            int chunkOverlap,
+            int topK,
+            double threshold,
+            int evidenceChars,
+            int evidenceUtf8Bytes,
+            int fullTextChars,
+            int fullTextUtf8Bytes
+    ) {
+        Set<Integer> selectedIndexes = new HashSet<>();
+        selected.forEach(chunk -> selectedIndexes.add(chunk.chunkIndex()));
+        int goldRelevant = 0;
+        int tp = 0;
+        int fp = 0;
+        int fn = 0;
+        for (LabeledChunk chunk : labeled) {
+            if (chunk.relevant()) {
+                goldRelevant += 1;
+            }
+            boolean picked = selectedIndexes.contains(chunk.index());
+            if (picked && chunk.relevant()) {
+                tp += 1;
+            } else if (picked) {
+                fp += 1;
+            } else if (chunk.relevant()) {
+                fn += 1;
+            }
+        }
+        Rates rates = rates(tp, fp, fn);
+        boolean predictedEvidenceGate = !selected.isEmpty();
+
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("strategy", strategy);
+        row.put("pairId", pair.id());
+        row.put("type", pair.type());
+        row.put("shouldMatch", pair.shouldMatch());
+        row.put("resumeId", pair.resumeId());
+        row.put("jobId", pair.jobId());
+        row.put("chunkSize", chunkSize);
+        row.put("chunkOverlap", chunkOverlap);
+        row.put("topK", topK);
+        row.put("threshold", threshold);
+        row.put("chunkCount", labeled.size());
+        row.put("goldRelevant", goldRelevant);
+        row.put("selectedChunks", selected.size());
+        row.put("tp", tp);
+        row.put("fp", fp);
+        row.put("fn", fn);
+        row.put("chunkPrecision", rates.precision());
+        row.put("chunkRecall", rates.recall());
+        row.put("chunkF1", rates.f1());
+        row.put("predictedEvidenceGate", predictedEvidenceGate);
+        row.put("pairCorrect", predictedEvidenceGate == pair.shouldMatch());
+        row.put("evidenceChars", evidenceChars);
+        row.put("evidenceUtf8Bytes", evidenceUtf8Bytes);
+        row.put("fullTextChars", fullTextChars);
+        row.put("fullTextUtf8Bytes", fullTextUtf8Bytes);
+        return row;
+    }
+
+    private static List<RetrievedChunk> selectRagEvidence(
+            List<RetrievedChunk> ranked,
+            int topK,
+            double threshold
+    ) {
+        List<RetrievedChunk> selected = new ArrayList<>();
+        for (RetrievedChunk chunk : ranked) {
+            if (chunk.rawSimilarity() >= threshold && selected.size() < topK) {
+                selected.add(chunk);
+            }
+        }
+        return selected;
+    }
+
+    private static List<Map<String, Object>> aggregateAblation(List<Map<String, Object>> pairRows) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (int chunkSize : ABLATION_CHUNK_SIZES) {
+            List<Map<String, Object>> fullRows = pairRows.stream()
+                    .filter(row -> "full_text".equals(row.get("strategy")))
+                    .filter(row -> intValue(row, "chunkSize") == chunkSize)
+                    .toList();
+            out.add(aggregateAblationRows(fullRows, "full_text", chunkSize, scaledOverlap(chunkSize), 0, 0.0));
+
+            for (int topK : ABLATION_TOP_KS) {
+                for (double threshold : ABLATION_THRESHOLDS) {
+                    List<Map<String, Object>> rows = pairRows.stream()
+                            .filter(row -> "rag".equals(row.get("strategy")))
+                            .filter(row -> intValue(row, "chunkSize") == chunkSize)
+                            .filter(row -> intValue(row, "topK") == topK)
+                            .filter(row -> Double.compare(doubleValue(row, "threshold"), threshold) == 0)
+                            .toList();
+                    out.add(aggregateAblationRows(
+                            rows, "rag", chunkSize, scaledOverlap(chunkSize), topK, threshold
+                    ));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static Map<String, Object> aggregateAblationRows(
+            List<Map<String, Object>> rows,
+            String strategy,
+            int chunkSize,
+            int chunkOverlap,
+            int topK,
+            double threshold
+    ) {
+        if (rows.isEmpty()) {
+            throw new IllegalStateException("missing ablation rows for " + strategy + " chunkSize=" + chunkSize);
+        }
+        int tp = sumInt(rows, "tp");
+        int fp = sumInt(rows, "fp");
+        int fn = sumInt(rows, "fn");
+        Rates chunkRates = rates(tp, fp, fn);
+
+        int pairTp = 0;
+        int pairFp = 0;
+        int pairFn = 0;
+        int pairTn = 0;
+        int selected = 0;
+        int positiveSelected = 0;
+        int negativeSelected = 0;
+        int positiveCount = 0;
+        int negativeCount = 0;
+        long payloadChars = 0;
+        long fullTextChars = 0;
+        long positivePayloadChars = 0;
+        long positiveFullTextChars = 0;
+        long negativePayloadChars = 0;
+        long negativeFullTextChars = 0;
+
+        for (Map<String, Object> row : rows) {
+            boolean shouldMatch = Boolean.TRUE.equals(row.get("shouldMatch"));
+            boolean predicted = Boolean.TRUE.equals(row.get("predictedEvidenceGate"));
+            if (shouldMatch && predicted) {
+                pairTp += 1;
+            } else if (!shouldMatch && predicted) {
+                pairFp += 1;
+            } else if (shouldMatch) {
+                pairFn += 1;
+            } else {
+                pairTn += 1;
+            }
+            int rowSelected = intValue(row, "selectedChunks");
+            long rowPayload = intValue(row, "evidenceChars");
+            long rowFullText = intValue(row, "fullTextChars");
+            selected += rowSelected;
+            payloadChars += rowPayload;
+            fullTextChars += rowFullText;
+            if (shouldMatch) {
+                positiveCount += 1;
+                positiveSelected += rowSelected;
+                positivePayloadChars += rowPayload;
+                positiveFullTextChars += rowFullText;
+            } else {
+                negativeCount += 1;
+                negativeSelected += rowSelected;
+                negativePayloadChars += rowPayload;
+                negativeFullTextChars += rowFullText;
+            }
+        }
+
+        Rates pairRates = rates(pairTp, pairFp, pairFn);
+        double payloadRatio = ratio(payloadChars, fullTextChars);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("strategy", strategy);
+        out.put("productionConfig", "rag".equals(strategy)
+                && chunkSize == 900 && topK == 5 && Double.compare(threshold, 0.72) == 0);
+        out.put("chunkSize", chunkSize);
+        out.put("chunkOverlap", chunkOverlap);
+        out.put("topK", topK);
+        out.put("threshold", threshold);
+        out.put("pairs", rows.size());
+        out.put("chunkPrecision", chunkRates.precision());
+        out.put("chunkRecall", chunkRates.recall());
+        out.put("chunkF1", chunkRates.f1());
+        out.put("pairPrecision", pairRates.precision());
+        out.put("pairRecall", pairRates.recall());
+        out.put("pairF1", pairRates.f1());
+        out.put("pairAccuracy", ratio(pairTp + pairTn, rows.size()));
+        out.put("pairTp", pairTp);
+        out.put("pairFp", pairFp);
+        out.put("pairFn", pairFn);
+        out.put("pairTn", pairTn);
+        out.put("llmRequestsTriggered", pairTp + pairFp);
+        out.put("llmRequestReduction", 1.0 - ratio(pairTp + pairFp, rows.size()));
+        out.put("meanSelectedChunks", ratio(selected, rows.size()));
+        out.put("positiveMeanSelectedChunks", ratio(positiveSelected, positiveCount));
+        out.put("negativeMeanSelectedChunks", ratio(negativeSelected, negativeCount));
+        out.put("payloadChars", payloadChars);
+        out.put("fullTextChars", fullTextChars);
+        out.put("payloadRatio", payloadRatio);
+        out.put("payloadReduction", 1.0 - payloadRatio);
+        out.put("positivePayloadRatio", ratio(positivePayloadChars, positiveFullTextChars));
+        out.put("negativePayloadRatio", ratio(negativePayloadChars, negativeFullTextChars));
+        return out;
+    }
+
+    private static String renderAblationReport(
+            List<Map<String, Object>> configRows,
+            DatasetFile dataset
+    ) {
+        Map<String, Object> full = findAblationConfig(configRows, "full_text", 900, 0, 0.0);
+        Map<String, Object> production = findAblationConfig(configRows, "rag", 900, 5, 0.72);
+
+        StringBuilder md = new StringBuilder();
+        md.append("# 全文直喂 vs RAG 消融实验\n\n");
+        md.append("生成时间：").append(Instant.now()).append("\n\n");
+        md.append("数据集复用 `../threshold-sweep/dataset`：")
+                .append(dataset.resumes().size()).append(" 份中文简历、")
+                .append(dataset.jobs().size()).append(" 份 JD、")
+                .append(dataset.pairs().size()).append(" 组配对（6 正、6 负、6 难负）。\n\n");
+        md.append("本实验比较的是**送入生成模型前的简历证据选择**。全文 baseline 直接提供原始简历；RAG 走真实 ")
+                .append("`TextChunker + ClsOnnxEmbeddingModel + LuceneVectorIndex + ResumeRagService`，")
+                .append("再按生产规则使用 raw similarity 过阈、boosted similarity 排序和 Top-K 截断。\n\n");
+
+        md.append("## 生产配置对照\n\n");
+        md.append("| 策略 | 块P | 块R | 块F1 | 证据门P | 证据门R | 证据门F1 | 门控准确率 | 触发LLM请求 | 请求减少 | 全体内容比 | 正样本内容比 | 负样本内容比 | 正样本均选块 |\n");
+        md.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        appendAblationSummaryRow(md, "全文 baseline", full);
+        appendAblationSummaryRow(md, "RAG（900 / Top-5 / 0.72）", production);
+
+        md.append("\n内容比 = 该策略简历证据字符数 / 全文字符数；不含两边共享的 JD、system prompt，")
+                .append("也不把字符数冒充供应商计费 token。RAG 的 chunk 头和规则元数据同样未计入，因此这里对 RAG 的体积估计偏保守。\n\n");
+
+        md.append("## RAG 参数网格\n\n");
+        md.append("| chunk / overlap | Top-K | 阈值 | 块F1 | 证据门F1 | 门控准确率 | LLM请求减少 | 全体内容比 | 正样本内容比 | 负样本内容比 |\n");
+        md.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        configRows.stream()
+                .filter(row -> "rag".equals(row.get("strategy")))
+                .forEach(row -> md.append("| ")
+                        .append(row.get("chunkSize")).append(" / ").append(row.get("chunkOverlap"))
+                        .append(" | ").append(row.get("topK"))
+                        .append(" | ").append(formatThreshold(doubleValue(row, "threshold")))
+                        .append(" | ").append(fmt(doubleValue(row, "chunkF1")))
+                        .append(" | ").append(fmt(doubleValue(row, "pairF1")))
+                        .append(" | ").append(fmt(doubleValue(row, "pairAccuracy")))
+                        .append(" | ").append(fmt(doubleValue(row, "llmRequestReduction")))
+                        .append(" | ").append(fmt(doubleValue(row, "payloadRatio")))
+                        .append(" | ").append(fmt(doubleValue(row, "positivePayloadRatio")))
+                        .append(" | ").append(fmt(doubleValue(row, "negativePayloadRatio")))
+                        .append(" |\n"));
+
+        md.append("\n## 可以说什么，不能说什么\n\n");
+        md.append("- 在这组短简历上，生产 RAG 的正样本内容比为 ")
+                .append(fmt(doubleValue(production, "positivePayloadRatio")))
+                .append("，正样本平均选择 ")
+                .append(fmt(doubleValue(production, "positiveMeanSelectedChunks")))
+                .append(" 个块；因此不能声称它靠缩短**对口短简历**显著省 token。\n");
+        md.append("- 它的可测收益是把负样本与难负样本的简历证据内容比降到 ")
+                .append(fmt(doubleValue(production, "negativePayloadRatio")))
+                .append("；配合生产代码的零证据短路，本数据集触发的 LLM 请求从 ")
+                .append(full.get("llmRequestsTriggered")).append(" 次降到 ")
+                .append(production.get("llmRequestsTriggered")).append(" 次，减少 ")
+                .append(percent(doubleValue(production, "llmRequestReduction")))
+                .append("，同时保留 chunk 引用链。\n");
+        md.append("- `证据门` 只表示是否有块过阈，不是 LLM 的最终匹配分类；`触发LLM请求` 是按零证据短路规则计算的请求次数。")
+                .append("本实验没有调用付费 LLM，所以不能把门控准确率写成端到端模型准确率，也没有真实供应商 token 账单。\n");
+        md.append("- 参数网格里存在同集分数高于生产配置的组合，但调参与评估使用的是同一组构造数据；")
+                .append("直接据此更换默认参数会产生选择偏差，必须先补独立 holdout 再决定。\n");
+        md.append("- 数据为 18 组构造配对且没有独立 holdout。参数网格用于小样本校准与方案解释，")
+                .append("不能宣称 0.72、900 或 Top-5 是普适最优。\n");
+        return md.toString();
+    }
+
+    private static void appendAblationSummaryRow(
+            StringBuilder md,
+            String label,
+            Map<String, Object> row
+    ) {
+        md.append("| ").append(label)
+                .append(" | ").append(fmt(doubleValue(row, "chunkPrecision")))
+                .append(" | ").append(fmt(doubleValue(row, "chunkRecall")))
+                .append(" | ").append(fmt(doubleValue(row, "chunkF1")))
+                .append(" | ").append(fmt(doubleValue(row, "pairPrecision")))
+                .append(" | ").append(fmt(doubleValue(row, "pairRecall")))
+                .append(" | ").append(fmt(doubleValue(row, "pairF1")))
+                .append(" | ").append(fmt(doubleValue(row, "pairAccuracy")))
+                .append(" | ").append(row.get("llmRequestsTriggered"))
+                .append(" | ").append(fmt(doubleValue(row, "llmRequestReduction")))
+                .append(" | ").append(fmt(doubleValue(row, "payloadRatio")))
+                .append(" | ").append(fmt(doubleValue(row, "positivePayloadRatio")))
+                .append(" | ").append(fmt(doubleValue(row, "negativePayloadRatio")))
+                .append(" | ").append(fmt(doubleValue(row, "positiveMeanSelectedChunks")))
+                .append(" |\n");
+    }
+
+    private static Map<String, Object> findAblationConfig(
+            List<Map<String, Object>> rows,
+            String strategy,
+            int chunkSize,
+            int topK,
+            double threshold
+    ) {
+        return rows.stream()
+                .filter(row -> strategy.equals(row.get("strategy")))
+                .filter(row -> intValue(row, "chunkSize") == chunkSize)
+                .filter(row -> intValue(row, "topK") == topK)
+                .filter(row -> Double.compare(doubleValue(row, "threshold"), threshold) == 0)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("missing ablation config " + strategy));
+    }
+
+    private static int scaledOverlap(int chunkSize) {
+        return Math.max(0, (int) Math.round(chunkSize * (120.0 / 900.0)));
+    }
+
+    private static int utf8Bytes(String text) {
+        return text == null ? 0 : text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static int intValue(Map<String, Object> row, String key) {
+        return ((Number) row.get(key)).intValue();
+    }
+
+    private static double doubleValue(Map<String, Object> row, String key) {
+        return ((Number) row.get(key)).doubleValue();
+    }
+
+    private static double ratio(long numerator, long denominator) {
+        return denominator == 0 ? 0.0 : (double) numerator / denominator;
+    }
+
+    private static String percent(double ratio) {
+        return String.format(Locale.ROOT, "%.1f%%", ratio * 100.0);
+    }
+
+    private static Path resolveAblationDir(Path sweepDir) {
+        String override = System.getenv("RAG_ABLATION_DIR");
+        if (override != null && !override.isBlank()) {
+            return Path.of(override).toAbsolutePath().normalize();
+        }
+        return sweepDir.getParent().resolve("rag-ablation").toAbsolutePath().normalize();
+    }
+
+    private static void deleteRecursively(Path root) {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (var paths = Files.walk(root)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (Exception ignored) {
+                    // Temporary experiment index cleanup is best effort.
+                }
+            });
+        } catch (Exception ignored) {
+            // Temporary experiment index cleanup is best effort.
         }
     }
 

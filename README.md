@@ -94,8 +94,10 @@ flowchart TD
     SUBMIT["POST /api/analysis-histories/ai<br/>落库 PENDING 后立即返回"]
     W["AiAnalysisWorker（异步）"]
     RAG["Hybrid RAG 检索<br/>见下方检索链路"]
+    GATE{"有 chunk 过阈？"}
     LLM["OpenAI 兼容 Chat<br/>DeepSeek / mock"]
-    SCORE["constrainScore<br/>硬技能覆盖 + 无证据强制 0 分"]
+    SCORE["constrainScore<br/>硬技能覆盖 + 分数上限"]
+    ZERO["0.00 + 可解释说明<br/>跳过 LLM 请求"]
     RECLAIM["PENDING 超时回收<br/>定时任务"]
     DB[("MySQL<br/>Flyway 版本化迁移")]
 
@@ -103,8 +105,11 @@ flowchart TD
     SEC --> CRUD --> DB
     SEC --> SUBMIT --> DB
     SUBMIT -. 提交异步任务 .-> W
-    W --> RAG --> LLM --> SCORE
+    W --> RAG --> GATE
+    GATE -- 是 --> LLM --> SCORE
+    GATE -- 否 --> ZERO
     SCORE -- COMPLETED / FAILED --> DB
+    ZERO -- COMPLETED --> DB
     RECLAIM -- 回收卡住的 PENDING --> DB
 ```
 
@@ -148,7 +153,7 @@ flowchart TD
 
 > **为什么阈值判断用 `raw` 而不是 `boosted`**：关键词 boost 的作用只是在**语义已相关**的块之间重排，若用 boosted 过阈，一个仅靠关键词命中、语义无关的块就可能被推进 prompt，污染证据链。因此 boosted 只参与排序，过阈一律以原始语义相似度为准（见 `ResumeRagService#retrieve`）。
 
-无过阈证据时，服务端强制匹配分为 **0.00**，避免「无关简历仍高分」。
+无过阈证据时，服务端直接落库 **0.00** 分与可解释说明，并跳过 LLM 请求，既避免「无关简历仍高分」也避免为零证据任务付生成成本。
 
 **阈值 0.72 是怎么定的**
 
@@ -170,6 +175,19 @@ flowchart TD
 这个实验同时反向验证了上面「用 raw 不用 boosted」的设计——在 0.55 时有 4 个块满足 `raw < 阈值 ≤ boosted`，正是靠这条规则被挡在 prompt 之外的。
 
 > **这组数字的适用范围（重要）**：校准集只有 18 组配对、11 个金标块，且简历与 JD 均为构造文本，**没有独立的 holdout 集**，因此它是一次小规模校准而非严格评测。结论**只对当前的 embedding 模型（`gte-multilingual-base-int8`）与分块配置（`chunkSize=900`/`overlap=120`）成立**——换模型或改分块都必须重跑。阈值本身保持可配置（`RAG_MIN_SIMILARITY` 环境变量），换语料时应当重新校准而不是沿用这个值。
+
+**RAG 消融：短简历为什么还需要检索**
+
+| 对比项 | 全文直投 | RAG（900 / Top-5 / 0.72） |
+|---|---:|---:|
+| 块级证据 F1 | 0.468 | **0.957** |
+| 预计触发 LLM 请求 | 18 | **6（-66.7%）** |
+| 负 / 难负证据内容比 | 1.000 | **0.000** |
+| 对口短简历证据内容比 | 1.000 | 1.059 |
+
+实验只有 18 组构造配对且没有独立 holdout，也没有调用付费 LLM；证据门控不是端到端匹配准确率，字符数也不是供应商计费 token。结果不支持“RAG 能给对口短简历省 token”，其可测价值是负样本短路、硬技能规则、可追溯 chunk 引用和后续长文档扩展性。
+
+[实验设计与复现](experiments/rag-ablation/README.md) · [完整报告与 48 组参数网格](experiments/rag-ablation/RESULTS.md) · [CSV / JSON 原始结果](experiments/rag-ablation/results/)
 
 ---
 
@@ -295,7 +313,7 @@ sudo docker info >/dev/null
 sg docker -c './mvnw test'
 ```
 
-完整验收应看到 `ResumeDeleteCascadeMySqlTests` 为 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0`（两条 MySQL 级联用例都真实执行），总汇总为 `Failures: 0, Errors: 0`，且**跳过项只剩三条**：真实 embedding 回归（`RUN_EMBEDDING_REGRESSION`）与两条阈值扫描实验（`RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP`）。
+完整验收应看到 `ResumeDeleteCascadeMySqlTests` 为 `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0`（两条 MySQL 级联用例都真实执行），总汇总为 `Failures: 0, Errors: 0`。默认跳过项只应来自显式门控的真实 embedding 回归（`RUN_EMBEDDING_REGRESSION`）、两条阈值扫描实验（`RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP`）和 RAG 消融实验（`RUN_RAG_ABLATION`）。
 
 用例总数会随测试增补而变化，因此这里不写死具体数字 —— 验收依据是 `Skipped` 的**构成**，而不是总数。
 
@@ -384,7 +402,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 - UI 通过 Actuator 实时探测**后端健康**；DeepSeek / 兼容模型是否可用仍以实际分析请求为准  
 - 旧的 Hibernate 建表数据库会由 Flyway baseline 为 V1；新数据库直接执行版本化迁移  
 - Compose 首次启动需下载本地 GTE 模型，耗时取决于网络  
-- `RealEmbeddingRegressionTests` 与 `ThresholdSweepExperimentTests` 默认跳过，需环境变量开启（`RUN_EMBEDDING_REGRESSION` / `RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP`）  
+- `RealEmbeddingRegressionTests` 与实验型 `ThresholdSweepExperimentTests` 默认跳过，需环境变量开启（`RUN_EMBEDDING_REGRESSION` / `RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP` / `RUN_RAG_ABLATION`）
 
 这些不影响主链路演示；公开部署前仍应继续做密钥外置与运行环境加固。
 
