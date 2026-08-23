@@ -327,8 +327,8 @@ node --experimental-strip-types --test tests/report-export.test.ts
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/auth/register` | 注册（同 IP 有频率限制；用户名/邮箱冲突返回同一错误码，409） |
-| POST | `/api/auth/login` | 登录，返回 JWT（同 IP+用户名有频率限制） |
+| POST | `/api/auth/register` | 注册（经 BFF 识别的客户端 IP 有频率限制；用户名/邮箱冲突返回同一错误码，409） |
+| POST | `/api/auth/login` | 登录，返回 JWT（经 BFF 识别的客户端 IP+用户名有频率限制） |
 | GET/PUT | `/api/users/me` | 当前用户 |
 | GET/POST | `/api/resumes` | 列表（不含 `rawText`，`size` 最大 50）/ 文本创建 |
 | POST | `/api/resumes/upload` | multipart 上传（计入 30 份 / 200MB 配额） |
@@ -364,7 +364,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | `app.upload.max-stored-bytes-per-user` | 默认 200MB |
 | `app.job-description.max-per-user` | 默认 200 |
 
-**安全提示**：当前配置面向本地演示；公开仓库前请移除真实密钥，改用环境变量或外部配置。
+**安全提示**：当前配置面向本地演示；公开仓库前请移除真实密钥，改用环境变量或外部配置。BFF 会覆盖 `X-BFF-Client-IP`，后端只信任 loopback/私有服务网来源，因此部署时不要绕过 BFF 将后端直接暴露到公网。
 
 ---
 
