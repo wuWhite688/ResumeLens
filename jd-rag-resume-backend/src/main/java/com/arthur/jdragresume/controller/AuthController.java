@@ -137,7 +137,6 @@ public class AuthController {
     }
 
     private static String clientKey(HttpServletRequest request) {
-        String address = request.getRemoteAddr();
-        return address == null || address.isBlank() ? "unknown" : address;
+        return ClientIpResolver.resolve(request);
     }
 }

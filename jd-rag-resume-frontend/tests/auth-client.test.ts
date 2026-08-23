@@ -6,7 +6,11 @@ import {
   refreshSession,
   setAccessToken,
 } from "../app/lib/api.ts";
-import { POST as proxyPost, rewriteUpstreamCookie } from "../app/api/backend/[...path]/route.ts";
+import {
+  POST as proxyPost,
+  clientIpFromHeaders,
+  rewriteUpstreamCookie,
+} from "../app/api/backend/[...path]/route.ts";
 
 const session = {
   tokenType: "Bearer" as const,
@@ -90,6 +94,33 @@ test("the backend proxy rewrites the refresh cookie path for the browser route",
     response.headers.get("set-cookie") || "",
     /Path=\/api\/backend\/api\/auth(?:;|$)/,
   );
+});
+
+test("the backend proxy replaces caller-supplied client identity with the edge address", async () => {
+  let forwardedHeaders = new Headers();
+  globalThis.fetch = async (_input, init) => {
+    forwardedHeaders = new Headers(init?.headers);
+    return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const request = new Request("http://localhost/api/backend/api/auth/register", {
+    method: "POST",
+    body: "{}",
+    headers: {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": "203.0.113.43",
+      "X-Forwarded-For": "198.51.100.8, 198.51.100.9",
+      "X-BFF-Client-IP": "192.0.2.99",
+    },
+  });
+
+  await proxyPost(request, {
+    params: Promise.resolve({ path: ["api", "auth", "register"] }),
+  });
+
+  assert.equal(clientIpFromHeaders(request.headers), "203.0.113.43");
+  assert.equal(forwardedHeaders.get("x-bff-client-ip"), "203.0.113.43");
+  assert.equal(forwardedHeaders.has("cf-connecting-ip"), false);
+  assert.equal(forwardedHeaders.has("x-forwarded-for"), false);
 });
 
 test("the backend proxy adds Secure on HTTPS but leaves local HTTP cookies intact", () => {
