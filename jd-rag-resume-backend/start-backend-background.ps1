@@ -40,11 +40,16 @@ function Test-PortOpen {
 function Save-RemoteFile {
     param(
         [string]$Uri,
-        [string]$Destination
+        [string]$Destination,
+        [string]$ExpectedSha256
     )
 
     if (Test-Path -LiteralPath $Destination) {
-        return
+        $existingHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+        if ($existingHash -ieq $ExpectedSha256) {
+            return
+        }
+        throw "RAG model asset checksum mismatch at '$Destination'. Expected $ExpectedSha256, got $existingHash. Delete the file and rerun to download the pinned artifact."
     }
 
     $parent = Split-Path -Parent $Destination
@@ -54,6 +59,11 @@ function Save-RemoteFile {
     & curl.exe -L --fail --retry 3 --retry-delay 2 -C - -o $partial $Uri
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to download $Uri"
+    }
+    $downloadedHash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
+    if ($downloadedHash -ine $ExpectedSha256) {
+        Remove-Item -LiteralPath $partial -Force
+        throw "Downloaded RAG model asset checksum mismatch for '$Uri'. Expected $ExpectedSha256, got $downloadedHash."
     }
     Move-Item -LiteralPath $partial -Destination $Destination -Force
 }
@@ -111,12 +121,15 @@ if (-not (Test-Path -LiteralPath $JarPath)) {
 $ragModelDirectory = Join-Path $PSScriptRoot 'models\gte-multilingual-base-int8'
 $ragTokenizerPath = Join-Path $ragModelDirectory 'tokenizer.json'
 $ragModelPath = Join-Path $ragModelDirectory 'model_int8.onnx'
+$ragModelRevision = '2edbf5e672aab465f9ed4c154a8b61791c082c69'
 Save-RemoteFile `
-    -Uri 'https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/tokenizer.json' `
-    -Destination $ragTokenizerPath
+    -Uri "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/$ragModelRevision/tokenizer.json" `
+    -Destination $ragTokenizerPath `
+    -ExpectedSha256 '3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20'
 Save-RemoteFile `
-    -Uri 'https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/onnx/model_int8.onnx' `
-    -Destination $ragModelPath
+    -Uri "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/$ragModelRevision/onnx/model_int8.onnx" `
+    -Destination $ragModelPath `
+    -ExpectedSha256 'ab2bd164ebd8ca9003dc49a981b611e849b5d326f504c8873ba76e07fa6c0082'
 if ([string]::IsNullOrWhiteSpace($env:RAG_EMBEDDING_TOKENIZER_URI)) {
     $env:RAG_EMBEDDING_TOKENIZER_URI = ([Uri]$ragTokenizerPath).AbsoluteUri
 }
