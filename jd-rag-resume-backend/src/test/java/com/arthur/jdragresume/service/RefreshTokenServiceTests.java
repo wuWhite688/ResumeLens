@@ -7,6 +7,7 @@ import com.arthur.jdragresume.repository.RefreshTokenRepository;
 import com.arthur.jdragresume.security.JwtProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Pageable;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -80,11 +81,38 @@ class RefreshTokenServiceTests {
         assertNotNull(repositoryState.familyRevokedAt);
     }
 
+    @Test
+    void cleanupDeletesOnlyOneBoundedBatch() {
+        repositoryState.cleanupCandidateIds = List.of(11L, 12L, 13L);
+
+        int deleted = refreshTokenService.cleanupExpiredAndRevokedTokens();
+
+        assertEquals(3, deleted);
+        assertEquals(List.of(11L, 12L, 13L), repositoryState.deletedIds);
+        assertEquals(500, repositoryState.cleanupPageable.getPageSize());
+        assertEquals(0, repositoryState.cleanupPageable.getPageNumber());
+        assertNotNull(repositoryState.expiredBefore);
+        assertNotNull(repositoryState.revokedBefore);
+    }
+
+    @Test
+    void cleanupSkipsDeleteWhenNoTokenIsEligible() {
+        int deleted = refreshTokenService.cleanupExpiredAndRevokedTokens();
+
+        assertEquals(0, deleted);
+        assertEquals(List.of(), repositoryState.deletedIds);
+    }
+
     private static final class RepositoryState implements InvocationHandler {
         private final List<RefreshToken> saved = new ArrayList<>();
         private Optional<RefreshToken> found = Optional.empty();
         private String revokedFamilyId;
         private LocalDateTime familyRevokedAt;
+        private List<Long> cleanupCandidateIds = List.of();
+        private List<Long> deletedIds = List.of();
+        private LocalDateTime expiredBefore;
+        private LocalDateTime revokedBefore;
+        private Pageable cleanupPageable;
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
@@ -99,6 +127,18 @@ class RefreshTokenServiceTests {
                     revokedFamilyId = (String) args[0];
                     familyRevokedAt = (LocalDateTime) args[1];
                     yield 1;
+                }
+                case "findCleanupCandidateIds" -> {
+                    expiredBefore = (LocalDateTime) args[0];
+                    revokedBefore = (LocalDateTime) args[1];
+                    cleanupPageable = (Pageable) args[3];
+                    yield cleanupCandidateIds;
+                }
+                case "deleteAllByIdInBatch" -> {
+                    @SuppressWarnings("unchecked")
+                    List<Long> ids = (List<Long>) args[0];
+                    deletedIds = List.copyOf(ids);
+                    yield null;
                 }
                 case "toString" -> "RefreshTokenRepositoryTestDouble";
                 default -> throw new UnsupportedOperationException("Unexpected repository call: " + method.getName());
