@@ -6,6 +6,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClsOnnxEmbeddingModelTests {
@@ -53,5 +54,26 @@ class ClsOnnxEmbeddingModelTests {
         assertTrue(Math.abs(actualCls[0] - mean[0]) > 0.1);
         assertEquals(1.0f, actualCls[0], 1e-5);
         assertEquals(0.0f, actualCls[1], 1e-5);
+    }
+
+    @Test
+    void acceptsMatchingSha256() {
+        ClsOnnxEmbeddingModel.verifySha256(
+                "fixture",
+                "pinned-model".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "8784c05c1dba20e7347b3954f1916de1ecbd38f5a2cce90063933a1ea03892d9"
+        );
+    }
+
+    @Test
+    void rejectsMismatchingSha256BeforeNativeLoad() {
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () ->
+                ClsOnnxEmbeddingModel.verifySha256(
+                        "fixture",
+                        "tampered-model".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        "8784c05c1dba20e7347b3954f1916de1ecbd38f5a2cce90063933a1ea03892d9"
+                ));
+
+        assertTrue(exception.getMessage().contains("SHA256 mismatch"));
     }
 }

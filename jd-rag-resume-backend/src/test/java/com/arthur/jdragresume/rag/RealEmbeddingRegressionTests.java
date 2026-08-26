@@ -12,10 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @EnabledIfEnvironmentVariable(named = "RUN_EMBEDDING_REGRESSION", matches = "true")
 class RealEmbeddingRegressionTests {
+    private static final String MODEL_REVISION = "2edbf5e672aab465f9ed4c154a8b61791c082c69";
+    private static final String TOKENIZER_SHA256 = "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20";
+    private static final String MODEL_SHA256 = "ab2bd164ebd8ca9003dc49a981b611e849b5d326f504c8873ba76e07fa6c0082";
     private static final String REMOTE_TOKENIZER =
-            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/tokenizer.json";
+            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/" + MODEL_REVISION + "/tokenizer.json";
     private static final String REMOTE_MODEL =
-            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/onnx/model_int8.onnx";
+            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/" + MODEL_REVISION + "/onnx/model_int8.onnx";
 
     @Test
     void relevantBackendEvidenceBeatsUnrelatedArtEvidenceByUsefulMargin() throws Exception {
@@ -30,6 +33,8 @@ class RealEmbeddingRegressionTests {
                         Path.of("models", "gte-multilingual-base-int8", "model_int8.onnx"),
                         REMOTE_MODEL
                 ),
+                TOKENIZER_SHA256,
+                MODEL_SHA256,
                 "token_embeddings",
                 Map.of("padding", "true", "truncation", "true", "modelMaxLength", "8192", "maxLength", "8192"),
                 768

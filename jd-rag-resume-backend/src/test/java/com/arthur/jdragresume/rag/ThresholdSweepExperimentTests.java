@@ -38,10 +38,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Gated so regular {@code mvnw verify} does not download or load the ONNX model.
  */
 class ThresholdSweepExperimentTests {
+    private static final String MODEL_REVISION = "2edbf5e672aab465f9ed4c154a8b61791c082c69";
+    private static final String TOKENIZER_SHA256 = "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20";
+    private static final String MODEL_SHA256 = "ab2bd164ebd8ca9003dc49a981b611e849b5d326f504c8873ba76e07fa6c0082";
     private static final String REMOTE_TOKENIZER =
-            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/tokenizer.json";
+            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/" + MODEL_REVISION + "/tokenizer.json";
     private static final String REMOTE_MODEL =
-            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/onnx/model_int8.onnx";
+            "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/" + MODEL_REVISION + "/onnx/model_int8.onnx";
     private static final List<Integer> ABLATION_CHUNK_SIZES = List.of(600, 900, 1200);
     private static final List<Integer> ABLATION_TOP_KS = List.of(1, 3, 5);
     private static final List<Double> ABLATION_THRESHOLDS = List.of(0.65, 0.70, 0.72, 0.75, 0.80);
@@ -110,6 +113,8 @@ class ThresholdSweepExperimentTests {
             ClsOnnxEmbeddingModel embeddingModel = new ClsOnnxEmbeddingModel(
                     tokenizerUri,
                     modelUri,
+                    TOKENIZER_SHA256,
+                    MODEL_SHA256,
                     properties.getModelOutputName(),
                     Map.of(
                             "padding", "true",
@@ -328,6 +333,8 @@ class ThresholdSweepExperimentTests {
             ClsOnnxEmbeddingModel embeddingModel = new ClsOnnxEmbeddingModel(
                     tokenizerUri,
                     modelUri,
+                    TOKENIZER_SHA256,
+                    MODEL_SHA256,
                     properties.getModelOutputName(),
                     Map.of(
                             "padding", "true",

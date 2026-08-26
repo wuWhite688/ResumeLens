@@ -16,6 +16,8 @@ public class RagConfig {
         return new ClsOnnxEmbeddingModel(
                 properties.getEmbeddingTokenizerUri(),
                 properties.getEmbeddingModelUri(),
+                properties.getEmbeddingTokenizerSha256(),
+                properties.getEmbeddingModelSha256(),
                 properties.getModelOutputName(),
                 Map.of(
                         "padding", "true",
