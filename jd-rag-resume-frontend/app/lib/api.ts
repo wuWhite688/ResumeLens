@@ -88,47 +88,62 @@ type ApiRequestOptions = {
 
 let accessToken = "";
 let refreshPromise: Promise<AuthResponse | null> | null = null;
+let refreshGeneration = -1;
+let logoutPromise: Promise<void> | null = null;
+let authGeneration = 0;
 
 export function setAccessToken(nextToken: string) {
+  authGeneration += 1;
   accessToken = nextToken;
   removeLegacyAuthStorage();
 }
 
 export function clearAuthSession() {
+  authGeneration += 1;
   accessToken = "";
   removeLegacyAuthStorage();
 }
 
 export async function refreshSession(): Promise<AuthResponse | null> {
-  if (refreshPromise) return refreshPromise;
+  if (logoutPromise) await logoutPromise;
+  const generation = authGeneration;
+  if (refreshPromise) {
+    if (refreshGeneration === generation) return refreshPromise;
+    await refreshPromise;
+    return refreshSession();
+  }
 
+  refreshGeneration = generation;
   refreshPromise = requestRefreshWithBrowserLock()
     .then((session) => {
+      if (generation !== authGeneration) return null;
       setAccessToken(session.accessToken);
       return session;
     })
     .catch(() => {
-      clearAuthSession();
+      if (generation === authGeneration) clearAuthSession();
       return null;
     })
     .finally(() => {
       refreshPromise = null;
+      refreshGeneration = -1;
     });
   return refreshPromise;
 }
 
-export async function logoutSession(): Promise<void> {
-  try {
-    await fetch(`${API_PREFIX}/api/auth/logout`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
+export function logoutSession(): Promise<void> {
+  if (logoutPromise) return logoutPromise;
+
+  clearAuthSession();
+  logoutPromise = requestLogoutWithBrowserLock()
+    .catch(() => {
+      // Local session cleanup must still complete when the backend is unavailable.
+    })
+    .finally(() => {
+      clearAuthSession();
+      logoutPromise = null;
     });
-  } catch {
-    // Local session cleanup must still complete when the backend is unavailable.
-  } finally {
-    clearAuthSession();
-  }
+  return logoutPromise;
 }
 
 export async function apiRequest<T>(
@@ -136,6 +151,11 @@ export async function apiRequest<T>(
   init: RequestInit = {},
   options: ApiRequestOptions = {},
 ): Promise<T> {
+  if (logoutPromise) await logoutPromise;
+  const startsExplicitSession = options.auth === false && /^\/api\/auth\/(?:login|register)$/.test(path);
+  if (startsExplicitSession && refreshPromise) {
+    await refreshPromise;
+  }
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   const requestAccessToken = accessToken;
@@ -145,11 +165,12 @@ export async function apiRequest<T>(
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json; charset=utf-8");
   }
-  const response = await fetch(`${API_PREFIX}${path}`, {
-    ...init,
-    headers,
-    credentials: "same-origin",
-  });
+  const send = () => fetch(`${API_PREFIX}${path}`, {
+      ...init,
+      headers,
+      credentials: "same-origin",
+    });
+  const response = startsExplicitSession ? await requestWithBrowserAuthLock(send) : await send();
   if (response.status === 401 && options.auth !== false) {
     if (options.retryAuth !== false) {
       if (requestAccessToken && requestAccessToken !== accessToken) {
@@ -186,10 +207,30 @@ async function requestSession(path: string): Promise<AuthResponse> {
 }
 
 async function requestRefreshWithBrowserLock(): Promise<AuthResponse> {
+  return requestWithBrowserAuthLock(() => requestSession("/api/auth/refresh"));
+}
+
+async function requestWithBrowserAuthLock<T>(request: () => Promise<T>): Promise<T> {
   if (typeof navigator !== "undefined" && navigator.locks) {
-    return navigator.locks.request("jd-rag-refresh-token", () => requestSession("/api/auth/refresh"));
+    return navigator.locks.request("jd-rag-refresh-token", request);
   }
-  return requestSession("/api/auth/refresh");
+  return request();
+}
+
+async function requestLogoutWithBrowserLock(): Promise<void> {
+  const request = async () => {
+    await fetch(`${API_PREFIX}/api/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+  };
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    await navigator.locks.request("jd-rag-refresh-token", request);
+    return;
+  }
+  if (refreshPromise) await refreshPromise;
+  await request();
 }
 
 function notifyAuthExpired() {

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   apiRequest,
   clearAuthSession,
+  logoutSession,
   refreshSession,
   setAccessToken,
 } from "../app/lib/api.ts";
@@ -62,6 +63,104 @@ test("parallel refresh calls share one browser request", async () => {
   assert.equal(calls, 1);
   assert.equal(first?.accessToken, "fresh-access-token");
   assert.equal(second?.accessToken, "fresh-access-token");
+});
+
+test("login waits for bootstrap refresh so its Set-Cookie response wins", async () => {
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  const loginSession = {
+    ...session,
+    accessToken: "new-login-token",
+    user: { ...session.user, id: 2, username: "new-user" },
+  };
+  let protectedAuthorization = "";
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/api/auth/refresh")) {
+      await refreshGate;
+      return Response.json({ success: true, code: "OK", message: "success", data: session });
+    }
+    if (url.endsWith("/api/auth/login")) {
+      return Response.json({ success: true, code: "OK", message: "success", data: loginSession });
+    }
+    protectedAuthorization = new Headers(init?.headers).get("Authorization") || "";
+    return Response.json({ success: true, code: "OK", message: "success", data: { ok: true } });
+  };
+
+  const bootstrap = refreshSession();
+  const loginPromise = apiRequest<AuthResponse>(
+    "/api/auth/login",
+    { method: "POST", body: JSON.stringify({ username: "new-user", password: "secret" }) },
+    { auth: false },
+  );
+  await Promise.resolve();
+  releaseRefresh();
+  assert.equal((await bootstrap)?.accessToken, "fresh-access-token");
+  const login = await loginPromise;
+  setAccessToken(login.accessToken);
+
+  await apiRequest<{ ok: boolean }>("/api/protected");
+  assert.equal(protectedAuthorization, "Bearer new-login-token");
+});
+
+test("a stale refresh cannot overwrite a newer explicitly installed token", async () => {
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  let protectedAuthorization = "";
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/api/auth/refresh")) {
+      await refreshGate;
+      return Response.json({ success: true, code: "OK", message: "success", data: session });
+    }
+    protectedAuthorization = new Headers(init?.headers).get("Authorization") || "";
+    return Response.json({ success: true, code: "OK", message: "success", data: { ok: true } });
+  };
+
+  const staleRefresh = refreshSession();
+  setAccessToken("explicit-new-token");
+  releaseRefresh();
+
+  assert.equal(await staleRefresh, null);
+  await apiRequest<{ ok: boolean }>("/api/protected");
+  assert.equal(protectedAuthorization, "Bearer explicit-new-token");
+});
+
+test("a new login waits for an in-flight logout response", async () => {
+  let releaseLogout!: () => void;
+  const logoutGate = new Promise<void>((resolve) => {
+    releaseLogout = resolve;
+  });
+  const calls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/api/auth/logout")) {
+      await logoutGate;
+      return Response.json({ success: true, code: "OK", message: "success", data: null });
+    }
+    return Response.json({ success: true, code: "OK", message: "success", data: session });
+  };
+
+  const logout = logoutSession();
+  const login = apiRequest<AuthResponse>(
+    "/api/auth/login",
+    { method: "POST", body: JSON.stringify({ username: "arthur", password: "secret" }) },
+    { auth: false },
+  );
+  await Promise.resolve();
+
+  assert.deepEqual(calls, ["/api/backend/api/auth/logout"]);
+  releaseLogout();
+  await logout;
+  assert.equal((await login).accessToken, "fresh-access-token");
+  assert.deepEqual(calls, [
+    "/api/backend/api/auth/logout",
+    "/api/backend/api/auth/login",
+  ]);
 });
 
 test("a successful 204 response resolves without trying to parse an envelope", async () => {
