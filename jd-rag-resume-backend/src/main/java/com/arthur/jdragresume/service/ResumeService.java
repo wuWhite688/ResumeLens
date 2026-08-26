@@ -129,6 +129,9 @@ public class ResumeService {
             Files.createDirectories(userDir);
             file.transferTo(storedPath);
             stored = true;
+            // 本方法是 @Transactional：save() 的 INSERT 可能推迟到方法返回后由代理 flush，
+            // 那时 catch 已经错过了，回滚只撤销数据库行、文件却留在磁盘上。
+            deleteFileOnRollback(storedPath);
 
             Resume resume = new Resume();
             resume.setUser(user);
@@ -298,6 +301,20 @@ public class ResumeService {
         } catch (Exception ex) {
             log.error("Database row was deleted but resume file cleanup failed: {}", storedFile, ex);
         }
+    }
+
+    private void deleteFileOnRollback(Path storedFile) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    deleteFile(storedFile);
+                }
+            }
+        });
     }
 
     private void afterCommit(Runnable cleanup) {
