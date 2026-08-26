@@ -53,6 +53,29 @@ const EMPTY_JOB_FORM = {
   description: "",
   requirements: "",
 };
+const HISTORY_PREVIEW_LIMIT = 8;
+const HISTORY_PAGE_SIZE = 20;
+const JOB_PAGE_SIZE = 50;
+type JobSort = "recent" | "score" | "analyzed";
+type JobFilter = "all" | "unanalyzed";
+
+function analysisTimestamp(item?: Analysis) {
+  const timestamp = item?.createdAt ? Date.parse(item.createdAt) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : -1;
+}
+
+function analysisScore(item?: Analysis) {
+  const score = Number(item?.matchScore);
+  return item?.status === "COMPLETED" && Number.isFinite(score) ? score : -1;
+}
+
+function jobScoreLabel(item?: Analysis) {
+  if (!item) return "未分析";
+  if (item.status === "PENDING") return "分析中";
+  if (item.status === "FAILED") return "失败";
+  const score = Number(item.matchScore);
+  return Number.isFinite(score) ? `${score.toFixed(0)} 分` : "—";
+}
 
 function renderCitedText(text: string) {
   const parts = text.split(/(\[chunk-\d+\])/g);
@@ -158,7 +181,18 @@ export default function Home() {
   const [auth, setAuth] = useState({ username: "", password: "", email: "", displayName: "" });
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsTotal, setJobsTotal] = useState(0);
+  const [jobsPage, setJobsPage] = useState(0);
+  const [jobsLoadingMore, setJobsLoadingMore] = useState(false);
+  const [jobSort, setJobSort] = useState<JobSort>("recent");
+  const [jobFilter, setJobFilter] = useState<JobFilter>("all");
+  const [jobLatestAnalyses, setJobLatestAnalyses] = useState<Analysis[]>([]);
+  const [jobAnalysesResumeId, setJobAnalysesResumeId] = useState<number | null>(null);
   const [history, setHistory] = useState<Analysis[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [selectedResumeId, setSelectedResumeId] = useState<number | "">("");
   const [selectedJobId, setSelectedJobId] = useState<number | "">("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -179,7 +213,15 @@ export default function Home() {
     setToken("");
     setUser(null);
     setAnalysis(null);
+    setJobs([]);
+    setJobsTotal(0);
+    setJobsPage(0);
+    setJobLatestAnalyses([]);
+    setJobAnalysesResumeId(null);
     setHistory([]);
+    setHistoryTotal(0);
+    setHistoryPage(0);
+    setHistoryExpanded(false);
   }
 
   async function waitForAnalysis(initial: Analysis) {
@@ -189,6 +231,9 @@ export default function Home() {
       onProgress: (next) => {
         setAnalysis(next);
         setHistory((items) => [next, ...items.filter((item) => item.id !== next.id)]);
+        if (next.resumeId === selectedResumeId) {
+          setJobLatestAnalyses((items) => [next, ...items.filter((item) => item.jobDescriptionId !== next.jobDescriptionId)]);
+        }
       },
     });
 
@@ -206,12 +251,16 @@ export default function Home() {
     try {
       const [resumePage, jobPage, historyPage] = await Promise.all([
         apiRequest<PageData<Resume>>("/api/resumes?size=50"),
-        apiRequest<PageData<Job>>("/api/job-descriptions?size=50"),
-        apiRequest<PageData<Analysis>>("/api/analysis-histories?size=20"),
+        apiRequest<PageData<Job>>(`/api/job-descriptions?page=0&size=${JOB_PAGE_SIZE}`),
+        apiRequest<PageData<Analysis>>(`/api/analysis-histories?page=0&size=${HISTORY_PAGE_SIZE}`),
       ]);
       setResumes(resumePage.content);
       setJobs(jobPage.content);
+      setJobsTotal(jobPage.totalElements);
+      setJobsPage(0);
       setHistory(historyPage.content);
+      setHistoryTotal(historyPage.totalElements);
+      setHistoryPage(0);
       if (!selectedResumeId && resumePage.content[0]) setSelectedResumeId(resumePage.content[0].id);
       if (!selectedJobId && jobPage.content[0]) setSelectedJobId(jobPage.content[0].id);
       if (!analysis && historyPage.content[0]?.status === "COMPLETED") setAnalysis(historyPage.content[0]);
@@ -221,6 +270,99 @@ export default function Home() {
       setBusy("");
     }
   }, [analysis, selectedJobId, selectedResumeId]);
+
+  useEffect(() => {
+    if (!token || !selectedResumeId) {
+      return;
+    }
+    let active = true;
+    void apiRequest<Analysis[]>(`/api/analysis-histories/latest-by-resume?resumeId=${selectedResumeId}`)
+      .then((items) => {
+        if (active) {
+          setJobLatestAnalyses(items);
+          setJobAnalysesResumeId(selectedResumeId);
+        }
+      })
+      .catch((reason) => {
+        if (active) {
+          setJobAnalysesResumeId(selectedResumeId);
+          setError(reason instanceof Error ? reason.message : "无法读取职位匹配分");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedResumeId, token]);
+
+  async function loadMoreJobs() {
+    if (jobsLoadingMore || jobs.length >= jobsTotal) return;
+    setJobsLoadingMore(true);
+    setError("");
+    try {
+      const nextPage = jobsPage + 1;
+      const page = await apiRequest<PageData<Job>>(
+        `/api/job-descriptions?page=${nextPage}&size=${JOB_PAGE_SIZE}`,
+      );
+      setJobs((items) => {
+        const seen = new Set(items.map((item) => item.id));
+        return [...items, ...page.content.filter((item) => !seen.has(item.id))];
+      });
+      setJobsTotal(page.totalElements);
+      setJobsPage(nextPage);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法加载更多职位");
+    } finally {
+      setJobsLoadingMore(false);
+    }
+  }
+
+  async function loadAllJobsForRanking() {
+    if (jobsLoadingMore || jobs.length >= jobsTotal) return;
+    setJobsLoadingMore(true);
+    setError("");
+    try {
+      const pageCount = Math.ceil(jobsTotal / JOB_PAGE_SIZE);
+      const pages = await Promise.all(
+        Array.from({ length: pageCount }, (_, page) =>
+          apiRequest<PageData<Job>>(`/api/job-descriptions?page=${page}&size=${JOB_PAGE_SIZE}`),
+        ),
+      );
+      const seen = new Set<number>();
+      setJobs(pages.flatMap((page) => page.content).filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      }));
+      setJobsTotal(pages[0]?.totalElements ?? jobsTotal);
+      setJobsPage(Math.max(0, pageCount - 1));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法加载完整职位库");
+    } finally {
+      setJobsLoadingMore(false);
+    }
+  }
+
+  async function loadMoreHistory() {
+    if (historyLoadingMore || history.length >= historyTotal) return;
+    setHistoryLoadingMore(true);
+    setError("");
+    try {
+      const nextPage = historyPage + 1;
+      const page = await apiRequest<PageData<Analysis>>(
+        `/api/analysis-histories?page=${nextPage}&size=${HISTORY_PAGE_SIZE}`,
+      );
+      setHistory((items) => {
+        const seen = new Set(items.map((item) => item.id));
+        return [...items, ...page.content.filter((item) => !seen.has(item.id))];
+      });
+      setHistoryTotal(page.totalElements);
+      setHistoryPage(nextPage);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法加载更多分析记录");
+    } finally {
+      setHistoryLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -408,6 +550,7 @@ export default function Home() {
       } else {
         saved = await apiRequest<Job>("/api/job-descriptions", { method: "POST", body: JSON.stringify(jobForm) });
         setJobs((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+        setJobsTotal((total) => total + 1);
         setNotice("职位 JD 已保存，可以开始匹配");
       }
       setSelectedJobId(saved.id);
@@ -444,6 +587,7 @@ export default function Home() {
     try {
       await apiRequest<void>(`/api/job-descriptions/${id}`, { method: "DELETE" });
       setJobs((items) => items.filter((item) => item.id !== id));
+      setJobsTotal((total) => Math.max(0, total - 1));
       if (selectedJobId === id) setSelectedJobId("");
       if (editingJobId === id) resetJobEditor();
       if (analysis?.jobDescriptionId === id) setAnalysis(null);
@@ -473,6 +617,7 @@ export default function Home() {
           return true;
         });
       });
+      setJobsTotal((total) => total + imported.length);
       if (imported[0]) setSelectedJobId(imported[0].id);
       setShowBulkImport(false);
       setNotice(`已批量导入 ${imported.length} 条职位（POST /api/job-descriptions/import）`);
@@ -538,6 +683,7 @@ export default function Home() {
       });
       setResumes((items) => [createdResume, ...items.filter((item) => item.id !== createdResume.id)]);
       setJobs((items) => [createdJob, ...items.filter((item) => item.id !== createdJob.id)]);
+      setJobsTotal((total) => total + 1);
       setSelectedResumeId(createdResume.id);
       setSelectedJobId(createdJob.id);
       setNotice("示例数据已保存，正在启动 Hybrid RAG 分析…");
@@ -605,6 +751,37 @@ export default function Home() {
     ? previewKept.reduce((sum, item) => sum + item.sim, 0) / previewKept.length
     : null;
   const previewStrengths = previewKept.filter((item) => PREVIEW_STRENGTHS[item.index]);
+  const effectiveHistoryTotal = Math.max(historyTotal, history.length);
+  const effectiveJobsTotal = Math.max(jobsTotal, jobs.length);
+  const jobAnalysesLoading = Boolean(selectedResumeId && jobAnalysesResumeId !== selectedResumeId);
+  const latestAnalysisByJob = useMemo(
+    () => new Map(
+      jobLatestAnalyses
+        .filter((item) => item.resumeId === selectedResumeId)
+        .map((item) => [item.jobDescriptionId, item]),
+    ),
+    [jobLatestAnalyses, selectedResumeId],
+  );
+  const visibleJobs = useMemo(() => {
+    const filtered = jobFilter === "unanalyzed"
+      ? jobs.filter((item) => !latestAnalysisByJob.has(item.id))
+      : [...jobs];
+    if (jobSort === "score") {
+      filtered.sort((left, right) =>
+        analysisScore(latestAnalysisByJob.get(right.id)) - analysisScore(latestAnalysisByJob.get(left.id))
+        || right.id - left.id,
+      );
+    } else if (jobSort === "analyzed") {
+      filtered.sort((left, right) =>
+        analysisTimestamp(latestAnalysisByJob.get(right.id)) - analysisTimestamp(latestAnalysisByJob.get(left.id))
+        || right.id - left.id,
+      );
+    }
+    return filtered;
+  }, [jobFilter, jobSort, jobs, latestAnalysisByJob]);
+  const visibleHistory = historyExpanded ? history : history.slice(0, HISTORY_PREVIEW_LIMIT);
+  const hiddenLoadedHistory = Math.max(0, history.length - HISTORY_PREVIEW_LIMIT);
+  const hasMoreHistory = history.length < effectiveHistoryTotal;
 
   if (!token) {
     return (
@@ -683,8 +860,8 @@ export default function Home() {
 
         <div className="overview-strip">
           <div className="overview-card"><span>已存简历</span><strong>{resumes.length}</strong><small>可在第 03 步选择</small></div>
-          <div className="overview-card"><span>已存职位</span><strong>{jobs.length}</strong><small>JD 双 Query 检索</small></div>
-          <div className="overview-card"><span>分析记录</span><strong>{history.length}</strong><small>含证据链落库</small></div>
+          <div className="overview-card"><span>已存职位</span><strong>{effectiveJobsTotal}</strong><small>JD 双 Query 检索</small></div>
+          <div className="overview-card"><span>分析记录</span><strong>{effectiveHistoryTotal}</strong><small>含证据链落库</small></div>
           <div className="overview-card hot"><span>检索策略</span><strong>CLS · Hybrid</strong><small>minSim {minSimilarityText(aiStatus)} · Top-K {topKText(aiStatus)}</small></div>
         </div>
 
@@ -783,22 +960,57 @@ export default function Home() {
                 </div>
               )}
               <div className="entity-library">
-                <div className="entity-library-head"><span>已存职位</span><em>{jobs.length}</em></div>
+                <div className="entity-library-head"><span>已存职位</span><em>{effectiveJobsTotal}</em></div>
+                <div className="job-library-controls">
+                  <select aria-label="职位排序" value={jobSort} onChange={(event) => {
+                    const next = event.target.value as JobSort;
+                    setJobSort(next);
+                    if (next !== "recent") void loadAllJobsForRanking();
+                  }}>
+                    <option value="recent">最近保存</option>
+                    <option value="score">匹配分最高</option>
+                    <option value="analyzed">最近分析</option>
+                  </select>
+                  <label>
+                    <input type="checkbox" checked={jobFilter === "unanalyzed"} onChange={(event) => {
+                      const next = event.target.checked ? "unanalyzed" : "all";
+                      setJobFilter(next);
+                      if (next === "unanalyzed") void loadAllJobsForRanking();
+                    }} />
+                    仅看未分析
+                  </label>
+                </div>
+                {(jobAnalysesLoading || jobsLoadingMore) && <p className="entity-empty">正在整理完整岗位库…</p>}
                 {jobs.length === 0 ? (
                   <p className="entity-empty">暂无职位，保存后会出现在这里</p>
-                ) : jobs.map((item) => (
-                  <div className={`entity-row ${selectedJobId === item.id ? "selected" : ""} ${editingJobId === item.id ? "editing" : ""}`} key={item.id}>
-                    <button type="button" className="entity-main" onClick={() => setSelectedJobId(item.id)} title="选为匹配职位">
-                      <strong>#{item.id} · {item.title}</strong>
-                      <small>{item.companyName}{item.location ? ` · ${item.location}` : ""}</small>
-                    </button>
-                    <div className="entity-actions">
-                      <Link className="ghost compact" href={`/jobs/${item.id}`}>详情</Link>
-                      <button type="button" className="ghost compact" onClick={() => beginEditJob(item)} disabled={!!busy}>编辑</button>
-                      <button type="button" className="ghost compact danger" onClick={() => void deleteJob(item.id)} disabled={!!busy}>删除</button>
+                ) : visibleJobs.length === 0 ? (
+                  <p className="entity-empty">当前简历下没有未分析职位</p>
+                ) : visibleJobs.map((item) => {
+                  const latest = latestAnalysisByJob.get(item.id);
+                  return (
+                    <div className={`entity-row ${selectedJobId === item.id ? "selected" : ""} ${editingJobId === item.id ? "editing" : ""}`} key={item.id}>
+                      <button type="button" className="entity-main job-entity-main" onClick={() => setSelectedJobId(item.id)} title="选为匹配职位">
+                        <span className="job-entity-copy">
+                          <strong>#{item.id} · {item.title}</strong>
+                          <small>{item.companyName}{item.location ? ` · ${item.location}` : ""}</small>
+                        </span>
+                        <em className={`job-score ${latest?.status.toLowerCase() || "unanalyzed"}`}>{jobScoreLabel(latest)}</em>
+                      </button>
+                      <div className="entity-actions">
+                        <Link className="ghost compact" href={`/jobs/${item.id}`}>详情</Link>
+                        <button type="button" className="ghost compact" onClick={() => beginEditJob(item)} disabled={!!busy}>编辑</button>
+                        <button type="button" className="ghost compact danger" onClick={() => void deleteJob(item.id)} disabled={!!busy}>删除</button>
+                      </div>
                     </div>
+                  );
+                })}
+                {jobs.length < effectiveJobsTotal && (
+                  <div className="entity-load-more">
+                    <button className="ghost compact" type="button" disabled={jobsLoadingMore} onClick={() => void loadMoreJobs()}>
+                      {jobsLoadingMore ? "加载中…" : `继续加载（还有 ${effectiveJobsTotal - jobs.length} 个）`}
+                    </button>
                   </div>
-                ))}
+                )}
               </div>
             </form>
 
@@ -983,14 +1195,14 @@ export default function Home() {
         </section>
 
         <section className="history" id="history">
-          <div className="section-heading"><div><span>HISTORY</span><h2>最近分析</h2></div><p>{history.length} 条记录</p></div>
+          <div className="section-heading"><div><span>HISTORY</span><h2>最近分析</h2></div><p>{effectiveHistoryTotal} 条记录</p></div>
           <div className="history-table">
             <div className="history-row history-head"><span>报告</span><span>岗位</span><span>状态</span><span>匹配度</span><span>时间</span></div>
             {history.length === 0 ? (
               <div className="history-empty">
                 暂无记录。用「一键示例匹配」生成第一条，之后每次分析都会出现在这里。
               </div>
-            ) : history.slice(0, 8).map((item) => (
+            ) : visibleHistory.map((item) => (
               <button className="history-row" key={item.id} type="button" onClick={() => { setAnalysis(item); document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }); }}>
                 <span>#{item.id} · {item.resumeTitle}</span>
                 <span>{item.jobTitle}</span>
@@ -999,6 +1211,18 @@ export default function Home() {
                 <span>{new Date(item.createdAt).toLocaleDateString("zh-CN")}</span>
               </button>
             ))}
+            {history.length > HISTORY_PREVIEW_LIMIT && (
+              <div className="history-more">
+                <button className="ghost compact" type="button" onClick={() => setHistoryExpanded((expanded) => !expanded)}>
+                  {historyExpanded ? "收起" : `展开其余 ${hiddenLoadedHistory} 条`}
+                </button>
+                {historyExpanded && hasMoreHistory && (
+                  <button className="ghost compact" type="button" disabled={historyLoadingMore} onClick={() => void loadMoreHistory()}>
+                    {historyLoadingMore ? "加载中…" : `继续加载（还有 ${effectiveHistoryTotal - history.length} 条）`}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </section>
       </main>

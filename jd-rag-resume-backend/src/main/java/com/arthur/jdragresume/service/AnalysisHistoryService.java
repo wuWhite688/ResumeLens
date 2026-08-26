@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
+import java.util.List;
 
 @Service
 public class AnalysisHistoryService {
@@ -61,6 +62,17 @@ public class AnalysisHistoryService {
                         jobDescriptionId
                 )
                 .map(AnalysisHistoryResponse::from);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AnalysisHistoryResponse> findLatestForEachJob(Long resumeId) {
+        AppUser user = currentUserService.getCurrentUser();
+        resumeService.getEntityForCurrentUser(resumeId);
+        return analysisHistoryRepository
+                .findLatestForEachJobByUserIdAndResumeId(user.getId(), resumeId)
+                .stream()
+                .map(AnalysisHistoryResponse::from)
+                .toList();
     }
 
     @Transactional

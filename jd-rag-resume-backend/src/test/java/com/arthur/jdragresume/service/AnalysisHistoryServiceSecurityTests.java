@@ -19,6 +19,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +43,7 @@ class AnalysisHistoryServiceSecurityTests {
                         yield repositoryState.saved;
                     }
                     case "findByIdAndUserId" -> repositoryState.found;
+                    case "findLatestForEachJobByUserIdAndResumeId" -> repositoryState.latest;
                     case "toString" -> "AnalysisHistoryRepositoryTestDouble";
                     default -> throw new UnsupportedOperationException(
                             "Unexpected repository call: " + method.getName()
@@ -110,6 +112,25 @@ class AnalysisHistoryServiceSecurityTests {
         assertEquals("edited summary", history.getSummary());
     }
 
+    @Test
+    void latestForEachJobUsesCurrentUserAndSelectedResume() {
+        AnalysisHistory history = new AnalysisHistory();
+        ReflectionTestUtils.setField(history, "id", 11L);
+        history.setUser(user);
+        history.setResume(resume);
+        history.setJobDescription(jobDescription);
+        history.setStatus(AnalysisStatus.COMPLETED);
+        history.setMatchScore(new BigDecimal("88.00"));
+        repositoryState.latest = List.of(history);
+
+        var result = analysisHistoryService.findLatestForEachJob(2L);
+
+        assertEquals(1, result.size());
+        assertEquals(11L, result.getFirst().id());
+        assertEquals(3L, result.getFirst().jobDescriptionId());
+        assertEquals(new BigDecimal("88.00"), result.getFirst().matchScore());
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
         return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler);
@@ -118,6 +139,7 @@ class AnalysisHistoryServiceSecurityTests {
     private static final class RepositoryState {
         private AnalysisHistory saved;
         private Optional<AnalysisHistory> found = Optional.empty();
+        private List<AnalysisHistory> latest = List.of();
     }
 
     private static final class FixedCurrentUserService extends CurrentUserService {
