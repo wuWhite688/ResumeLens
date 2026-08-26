@@ -19,8 +19,11 @@ import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
 import org.springframework.util.Assert;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +39,8 @@ import java.util.stream.Collectors;
 public class ClsOnnxEmbeddingModel implements EmbeddingModel, InitializingBean, DisposableBean {
     private final String tokenizerUri;
     private final String modelUri;
+    private final String tokenizerSha256;
+    private final String modelSha256;
     private final String modelOutputName;
     private final Map<String, String> tokenizerOptions;
     private final int embeddingDimensions;
@@ -49,12 +54,16 @@ public class ClsOnnxEmbeddingModel implements EmbeddingModel, InitializingBean, 
     public ClsOnnxEmbeddingModel(
             String tokenizerUri,
             String modelUri,
+            String tokenizerSha256,
+            String modelSha256,
             String modelOutputName,
             Map<String, String> tokenizerOptions,
             int embeddingDimensions
     ) {
         this.tokenizerUri = tokenizerUri;
         this.modelUri = modelUri;
+        this.tokenizerSha256 = tokenizerSha256;
+        this.modelSha256 = modelSha256;
         this.modelOutputName = modelOutputName;
         this.tokenizerOptions = tokenizerOptions == null ? Map.of() : Map.copyOf(tokenizerOptions);
         this.embeddingDimensions = embeddingDimensions;
@@ -70,13 +79,17 @@ public class ClsOnnxEmbeddingModel implements EmbeddingModel, InitializingBean, 
                 new DefaultResourceLoader().getResource(modelUri)
         );
 
-        try (InputStream tokenizerStream = tokenizerResource.getInputStream()) {
+        byte[] tokenizerBytes = tokenizerResource.getContentAsByteArray();
+        verifySha256("tokenizer", tokenizerBytes, tokenizerSha256);
+        try (InputStream tokenizerStream = new ByteArrayInputStream(tokenizerBytes)) {
             this.tokenizer = HuggingFaceTokenizer.newInstance(tokenizerStream, tokenizerOptions);
         }
 
+        byte[] modelBytes = modelResource.getContentAsByteArray();
+        verifySha256("ONNX model", modelBytes, modelSha256);
         this.environment = OrtEnvironment.getEnvironment();
         try (OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions()) {
-            this.session = environment.createSession(modelResource.getContentAsByteArray(), sessionOptions);
+            this.session = environment.createSession(modelBytes, sessionOptions);
         }
         this.modelInputNames = session.getInputNames();
         Set<String> outputs = session.getOutputNames();
@@ -84,6 +97,21 @@ public class ClsOnnxEmbeddingModel implements EmbeddingModel, InitializingBean, 
                 outputs.contains(modelOutputName),
                 "ONNX outputs " + outputs + " do not contain expected output: " + modelOutputName
         );
+    }
+
+    static void verifySha256(String resourceName, byte[] content, String expectedSha256) {
+        Assert.hasText(expectedSha256, resourceName + " SHA256 must be configured");
+        Assert.isTrue(expectedSha256.matches("(?i)[0-9a-f]{64}"),
+                resourceName + " SHA256 must contain exactly 64 hexadecimal characters");
+        try {
+            String actual = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+            if (!actual.equalsIgnoreCase(expectedSha256)) {
+                throw new IllegalStateException(resourceName + " SHA256 mismatch: expected "
+                        + expectedSha256.toLowerCase() + ", got " + actual);
+            }
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     @Override

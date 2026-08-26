@@ -41,8 +41,10 @@ public class RagProperties {
     private String modelOutputName = "token_embeddings";
     private String poolingMode = "cls";
     private String embeddingModelId = "Alibaba-NLP/gte-multilingual-base-int8";
-    private String embeddingTokenizerUri = "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/tokenizer.json";
-    private String embeddingModelUri = "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/onnx/model_int8.onnx";
+    private String embeddingTokenizerUri = "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/2edbf5e672aab465f9ed4c154a8b61791c082c69/tokenizer.json";
+    private String embeddingModelUri = "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/2edbf5e672aab465f9ed4c154a8b61791c082c69/onnx/model_int8.onnx";
+    private String embeddingTokenizerSha256 = "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20";
+    private String embeddingModelSha256 = "ab2bd164ebd8ca9003dc49a981b611e849b5d326f504c8873ba76e07fa6c0082";
     private String queryPrefix = "Represent this sentence for searching relevant passages:";
 
     public int getChunkSize() {
@@ -179,6 +181,22 @@ public class RagProperties {
 
     public void setEmbeddingModelUri(String embeddingModelUri) {
         this.embeddingModelUri = embeddingModelUri;
+    }
+
+    public String getEmbeddingTokenizerSha256() {
+        return embeddingTokenizerSha256;
+    }
+
+    public void setEmbeddingTokenizerSha256(String embeddingTokenizerSha256) {
+        this.embeddingTokenizerSha256 = embeddingTokenizerSha256;
+    }
+
+    public String getEmbeddingModelSha256() {
+        return embeddingModelSha256;
+    }
+
+    public void setEmbeddingModelSha256(String embeddingModelSha256) {
+        this.embeddingModelSha256 = embeddingModelSha256;
     }
 
     public String getQueryPrefix() {
