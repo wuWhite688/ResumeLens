@@ -224,10 +224,11 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
+    const params = new URLSearchParams(window.location.search);
+    const resumeIdParam = Number(params.get("resumeId"));
+    const jobIdParam = Number(params.get("jobId"));
+    const analysisIdParam = Number(params.get("analysisId"));
     const locationTimer = window.setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      const resumeIdParam = Number(params.get("resumeId"));
-      const jobIdParam = Number(params.get("jobId"));
       if (Number.isFinite(resumeIdParam) && resumeIdParam > 0) setSelectedResumeId(resumeIdParam);
       if (Number.isFinite(jobIdParam) && jobIdParam > 0) setSelectedJobId(jobIdParam);
     }, 0);
@@ -245,10 +246,18 @@ export default function Home() {
         // Keep the UI neutral when runtime mode cannot be confirmed.
       });
     void refreshSession().then(async (session) => {
-      if (!session) return;
+      if (!session || !active) return;
       setToken(session.accessToken);
       setUser(session.user);
       await loadWorkspace();
+      if (Number.isFinite(analysisIdParam) && analysisIdParam > 0 && active) {
+        try {
+          const requestedAnalysis = await apiRequest<Analysis>(`/api/analysis-histories/${analysisIdParam}`);
+          if (active) setAnalysis(requestedAnalysis);
+        } catch (reason) {
+          if (active) setError(reason instanceof Error ? reason.message : "无法读取指定分析报告");
+        }
+      }
     });
     return () => {
       active = false;

@@ -16,6 +16,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 public class AnalysisHistoryService {
     private final AnalysisHistoryRepository analysisHistoryRepository;
@@ -47,6 +49,18 @@ public class AnalysisHistoryService {
     @Transactional(readOnly = true)
     public AnalysisHistoryResponse findById(Long id) {
         return AnalysisHistoryResponse.from(getEntityForCurrentUser(id));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<AnalysisHistoryResponse> findLatest(Long resumeId, Long jobDescriptionId) {
+        AppUser user = currentUserService.getCurrentUser();
+        return analysisHistoryRepository
+                .findFirstByUser_IdAndResume_IdAndJobDescription_IdOrderByCreatedAtDesc(
+                        user.getId(),
+                        resumeId,
+                        jobDescriptionId
+                )
+                .map(AnalysisHistoryResponse::from);
     }
 
     @Transactional

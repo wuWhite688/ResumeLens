@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ResumeLens 岗位助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div class="brand-mark">R</div>
+        <div>
+          <span class="eyebrow">RESUMELENS</span>
+          <h1>岗位助手</h1>
+        </div>
+        <button id="refresh-job" class="icon-button" type="button" title="重新抓取当前岗位">↻</button>
+      </header>
+
+      <div id="status" class="status" data-tone="working">正在读取当前岗位…</div>
+      <button id="open-resumelens" class="connection-button hidden" type="button">打开 ResumeLens 并登录</button>
+      <div id="duplicate" class="duplicate hidden"></div>
+      <div id="warnings" class="warnings hidden"></div>
+
+      <form id="job-form" class="hidden">
+        <div class="two-columns">
+          <label>职位名称<input id="title" maxlength="160" required /></label>
+          <label>公司<input id="companyName" maxlength="120" required /></label>
+        </div>
+        <div class="two-columns compact-columns">
+          <label>地点<input id="location" maxlength="80" /></label>
+          <label>类型<select id="employmentType"><option>全职</option><option>实习</option><option>兼职</option></select></label>
+        </div>
+        <label>JD 正文<textarea id="description" maxlength="20000" rows="7" required></textarea></label>
+        <label>技能标签 / 要求<textarea id="requirements" maxlength="20000" rows="3"></textarea></label>
+        <label>匹配简历<select id="resumeId" required><option value="">正在读取简历库…</option></select></label>
+        <div class="actions">
+          <button id="analyze" class="primary" type="submit">分析并保存</button>
+          <button id="reanalyze" class="secondary hidden" type="button">重新分析</button>
+        </div>
+      </form>
+
+      <section id="result" class="result hidden" aria-live="polite">
+        <div class="result-head">
+          <div><span>匹配度</span><strong id="score">—</strong></div>
+          <span id="analysis-status" class="pill">等待中</span>
+        </div>
+        <p id="summary" class="summary"></p>
+        <div id="result-details"></div>
+        <a id="full-report" class="report-link hidden" target="_blank" rel="noreferrer">在 ResumeLens 查看完整报告 →</a>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

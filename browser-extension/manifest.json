@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "ResumeLens 岗位助手",
+  "version": "0.1.0",
+  "description": "从 BOSS 直聘抓取当前 JD，在 ResumeLens 中查重、保存并完成简历匹配。",
+  "permissions": ["scripting"],
+  "host_permissions": [
+    "https://www.zhipin.com/*",
+    "https://*.zhipin.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "action": {
+    "default_title": "ResumeLens 岗位助手",
+    "default_popup": "src/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.zhipin.com/*", "https://*.zhipin.com/*"],
+      "js": ["src/boss-extractor.js", "src/content-boss.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+      "js": ["src/content-resumelens.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

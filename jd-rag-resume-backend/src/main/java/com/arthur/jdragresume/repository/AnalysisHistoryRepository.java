@@ -17,6 +17,12 @@ import java.time.LocalDateTime;
 public interface AnalysisHistoryRepository extends JpaRepository<AnalysisHistory, Long> {
     Optional<AnalysisHistory> findByIdAndUserId(Long id, Long userId);
 
+    Optional<AnalysisHistory> findFirstByUser_IdAndResume_IdAndJobDescription_IdOrderByCreatedAtDesc(
+            Long userId,
+            Long resumeId,
+            Long jobDescriptionId
+    );
+
     boolean existsByUser_IdAndResume_IdAndJobDescription_IdAndStatus(
             Long userId,
             Long resumeId,

@@ -13,6 +13,11 @@ public record JobDescriptionResponse(
         String employmentType,
         String description,
         String requirements,
+        String sourcePlatform,
+        String sourceUrl,
+        String sourceJobId,
+        String contentFingerprint,
+        LocalDateTime lastSeenAt,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -26,6 +31,11 @@ public record JobDescriptionResponse(
                 jobDescription.getEmploymentType(),
                 jobDescription.getDescription(),
                 jobDescription.getRequirements(),
+                jobDescription.getSourcePlatform(),
+                jobDescription.getSourceUrl(),
+                jobDescription.getSourceJobId(),
+                jobDescription.getContentFingerprint(),
+                jobDescription.getLastSeenAt(),
                 jobDescription.getCreatedAt(),
                 jobDescription.getUpdatedAt()
         );

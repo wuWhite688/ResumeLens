@@ -48,6 +48,16 @@ public class AnalysisHistoryController {
         return ApiResponse.ok(analysisHistoryService.findById(id));
     }
 
+    @GetMapping("/latest")
+    public ApiResponse<AnalysisHistoryResponse> findLatest(
+            @RequestParam Long resumeId,
+            @RequestParam Long jobDescriptionId
+    ) {
+        return ApiResponse.ok(
+                analysisHistoryService.findLatest(resumeId, jobDescriptionId).orElse(null)
+        );
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AnalysisHistoryResponse> create(@Valid @RequestBody AnalysisHistoryRequest request) {

@@ -11,6 +11,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "job_description")
 public class JobDescription extends AuditableEntity {
@@ -41,6 +43,20 @@ public class JobDescription extends AuditableEntity {
     @Lob
     @Column(columnDefinition = "LONGTEXT")
     private String requirements;
+
+    @Column(length = 32)
+    private String sourcePlatform;
+
+    @Column(length = 2048)
+    private String sourceUrl;
+
+    @Column(length = 160)
+    private String sourceJobId;
+
+    @Column(length = 64)
+    private String contentFingerprint;
+
+    private LocalDateTime lastSeenAt;
 
     public Long getId() {
         return id;
@@ -100,5 +116,45 @@ public class JobDescription extends AuditableEntity {
 
     public void setRequirements(String requirements) {
         this.requirements = requirements;
+    }
+
+    public String getSourcePlatform() {
+        return sourcePlatform;
+    }
+
+    public void setSourcePlatform(String sourcePlatform) {
+        this.sourcePlatform = sourcePlatform;
+    }
+
+    public String getSourceUrl() {
+        return sourceUrl;
+    }
+
+    public void setSourceUrl(String sourceUrl) {
+        this.sourceUrl = sourceUrl;
+    }
+
+    public String getSourceJobId() {
+        return sourceJobId;
+    }
+
+    public void setSourceJobId(String sourceJobId) {
+        this.sourceJobId = sourceJobId;
+    }
+
+    public String getContentFingerprint() {
+        return contentFingerprint;
+    }
+
+    public void setContentFingerprint(String contentFingerprint) {
+        this.contentFingerprint = contentFingerprint;
+    }
+
+    public LocalDateTime getLastSeenAt() {
+        return lastSeenAt;
+    }
+
+    public void setLastSeenAt(LocalDateTime lastSeenAt) {
+        this.lastSeenAt = lastSeenAt;
     }
 }

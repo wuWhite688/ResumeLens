@@ -25,6 +25,11 @@ export type Job = {
   employmentType?: string;
   description: string;
   requirements?: string;
+  sourcePlatform?: string;
+  sourceUrl?: string;
+  sourceJobId?: string;
+  contentFingerprint?: string;
+  lastSeenAt?: string;
   createdAt?: string;
   updatedAt?: string;
 };
