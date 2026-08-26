@@ -7,8 +7,10 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
@@ -22,5 +24,18 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     int revokeActiveFamily(
             @Param("familyId") String familyId,
             @Param("revokedAt") LocalDateTime revokedAt
+    );
+
+    @Query("""
+            select token.id from RefreshToken token
+            where (token.revokedAt is null and token.expiresAt < :expiredBefore)
+               or (token.expiresAt < :now and token.revokedAt is not null and token.revokedAt < :revokedBefore)
+            order by token.id
+            """)
+    List<Long> findCleanupCandidateIds(
+            @Param("expiredBefore") LocalDateTime expiredBefore,
+            @Param("revokedBefore") LocalDateTime revokedBefore,
+            @Param("now") LocalDateTime now,
+            Pageable pageable
     );
 }

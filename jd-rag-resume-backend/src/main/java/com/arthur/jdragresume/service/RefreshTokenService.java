@@ -5,6 +5,10 @@ import com.arthur.jdragresume.entity.RefreshToken;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.RefreshTokenRepository;
 import com.arthur.jdragresume.security.JwtProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,12 +19,16 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 @Service
 public class RefreshTokenService {
+    private static final Logger log = LoggerFactory.getLogger(RefreshTokenService.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Base64.Encoder TOKEN_ENCODER = Base64.getUrlEncoder().withoutPadding();
+    private static final int CLEANUP_BATCH_SIZE = 500;
+    private static final long EXPIRED_TOKEN_RETENTION_DAYS = 1;
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final JwtProperties jwtProperties;
@@ -74,6 +82,28 @@ public class RefreshTokenService {
                 refreshTokenRepository.save(token);
             }
         });
+    }
+
+    @Scheduled(
+            initialDelayString = "${app.jwt.cleanup-initial-delay-ms:60000}",
+            fixedDelayString = "${app.jwt.cleanup-interval-ms:3600000}"
+    )
+    @Transactional
+    public int cleanupExpiredAndRevokedTokens() {
+        LocalDateTime now = LocalDateTime.now();
+        long revokedRetentionDays = Math.max(1, jwtProperties.getRefreshExpirationDays());
+        List<Long> candidateIds = refreshTokenRepository.findCleanupCandidateIds(
+                now.minusDays(EXPIRED_TOKEN_RETENTION_DAYS),
+                now.minusDays(revokedRetentionDays),
+                now,
+                PageRequest.of(0, CLEANUP_BATCH_SIZE)
+        );
+        if (candidateIds.isEmpty()) {
+            return 0;
+        }
+        refreshTokenRepository.deleteAllByIdInBatch(candidateIds);
+        log.info("Deleted {} expired or retired refresh tokens", candidateIds.size());
+        return candidateIds.size();
     }
 
     private IssuedRefreshToken create(AppUser user, String familyId) {
