@@ -2,8 +2,11 @@ package com.arthur.jdragresume.service;
 
 import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.job.JobDescriptionBulkImportRequest;
+import com.arthur.jdragresume.dto.job.JobCaptureRequest;
+import com.arthur.jdragresume.dto.job.JobCaptureResponse;
 import com.arthur.jdragresume.dto.job.JobDescriptionRequest;
 import com.arthur.jdragresume.dto.job.JobDescriptionResponse;
+import com.arthur.jdragresume.dto.job.JobSourceLookupResponse;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.exception.BusinessException;
@@ -17,7 +20,13 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class JobDescriptionService {
@@ -84,6 +93,58 @@ public class JobDescriptionService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public JobSourceLookupResponse findBySource(String sourcePlatform, String sourceJobId) {
+        AppUser user = currentUserService.getCurrentUser();
+        return jobDescriptionRepository.findByUserIdAndSourcePlatformAndSourceJobId(
+                        user.getId(),
+                        normalizeSourcePlatform(sourcePlatform),
+                        normalizeSourceJobId(sourceJobId)
+                )
+                .map(JobDescriptionResponse::from)
+                .map(JobSourceLookupResponse::found)
+                .orElseGet(JobSourceLookupResponse::missing);
+    }
+
+    @Transactional
+    public JobCaptureResponse capture(JobCaptureRequest request) {
+        AppUser user = lockCurrentUser();
+        String sourcePlatform = normalizeSourcePlatform(request.sourcePlatform());
+        String sourceJobId = normalizeSourceJobId(request.sourceJobId());
+        String fingerprint = contentFingerprint(request);
+        LocalDateTime now = LocalDateTime.now();
+
+        var existing = jobDescriptionRepository.findByUserIdAndSourcePlatformAndSourceJobId(
+                user.getId(),
+                sourcePlatform,
+                sourceJobId
+        );
+        if (existing.isPresent()) {
+            JobDescription jobDescription = existing.get();
+            boolean contentChanged = !fingerprint.equals(jobDescription.getContentFingerprint());
+            if (contentChanged) {
+                applyCaptureRequest(jobDescription, request);
+                jobDescription.setContentFingerprint(fingerprint);
+            }
+            jobDescription.setSourceUrl(request.sourceUrl().trim());
+            jobDescription.setLastSeenAt(now);
+            JobDescription saved = jobDescriptionRepository.save(jobDescription);
+            return new JobCaptureResponse(JobDescriptionResponse.from(saved), true, contentChanged);
+        }
+
+        enforceJobDescriptionCount(user, 1);
+        JobDescription jobDescription = new JobDescription();
+        jobDescription.setUser(user);
+        applyCaptureRequest(jobDescription, request);
+        jobDescription.setSourcePlatform(sourcePlatform);
+        jobDescription.setSourceUrl(request.sourceUrl().trim());
+        jobDescription.setSourceJobId(sourceJobId);
+        jobDescription.setContentFingerprint(fingerprint);
+        jobDescription.setLastSeenAt(now);
+        JobDescription saved = jobDescriptionRepository.save(jobDescription);
+        return new JobCaptureResponse(JobDescriptionResponse.from(saved), false, false);
+    }
+
     @Transactional
     public JobDescriptionResponse update(Long id, JobDescriptionRequest request) {
         JobDescription jobDescription = getEntityForCurrentUser(id);
@@ -135,6 +196,59 @@ public class JobDescriptionService {
         jobDescription.setEmploymentType(request.employmentType());
         jobDescription.setDescription(request.description());
         jobDescription.setRequirements(request.requirements());
+    }
+
+    private void applyCaptureRequest(JobDescription jobDescription, JobCaptureRequest request) {
+        jobDescription.setTitle(request.title().trim());
+        jobDescription.setCompanyName(request.companyName().trim());
+        jobDescription.setLocation(trimToNull(request.location()));
+        jobDescription.setEmploymentType(trimToNull(request.employmentType()));
+        jobDescription.setDescription(request.description().trim());
+        jobDescription.setRequirements(trimToNull(request.requirements()));
+    }
+
+    private String normalizeSourcePlatform(String value) {
+        String normalized = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+        if (normalized.isBlank() || normalized.length() > 32) {
+            throw new IllegalArgumentException("sourcePlatform must contain 1 to 32 characters");
+        }
+        return normalized;
+    }
+
+    private String normalizeSourceJobId(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isBlank() || normalized.length() > 160) {
+            throw new IllegalArgumentException("sourceJobId must contain 1 to 160 characters");
+        }
+        return normalized;
+    }
+
+    private String contentFingerprint(JobCaptureRequest request) {
+        String canonical = String.join("\n",
+                fingerprintPart(request.title()),
+                fingerprintPart(request.companyName()),
+                fingerprintPart(request.location()),
+                fingerprintPart(request.employmentType()),
+                fingerprintPart(request.description()),
+                fingerprintPart(request.requirements())
+        );
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
+
+    private String fingerprintPart(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String normalizeKeyword(String keyword) {

@@ -52,6 +52,7 @@
 - **账号**：注册 / 登录、BCrypt 密码、JWT 无状态鉴权、按用户隔离数据；登录/注册有基础频率限制
 - **简历**：文本创建或文件上传（每用户最多 30 份、已存文件合计 200MB）、列表检索、编辑、删除（含上传文件与 Lucene 向量清理）
 - **职位 JD**：创建、编辑、删除、**JSON 批量导入**（前端入口 + `POST /api/job-descriptions/import`，每用户最多 200 条）
+- **BOSS 浏览器扩展**：抓取当前 JD、允许提交前校正、选择已存简历并在扩展内查看分析；按 BOSS 岗位 ID 写入个人岗位库并复用历史结果（见 [`browser-extension/`](browser-extension/)）
 - **独立详情页**：`/resumes/[id]`、`/jobs/[id]`（查看 / 编辑 / 删除，复用已有 GET/PUT/DELETE）
 - **智能匹配**：异步分析任务（同一简历+JD 的 PENDING 去重；每用户最多 2 条进行中、10 分钟 10 次）；Hybrid RAG 召回证据；硬技能覆盖与服务端分数上限
 - **可解释报告**：匹配分、优势 / 缺口 / 建议 / 面试题、chunk 级证据与 `[chunk-N]` 引用
@@ -73,10 +74,11 @@
 │   ├── src/main/java/...
 │   ├── src/test/java/...
 │   └── start-backend-background.ps1
-└── jd-rag-resume-frontend/        # ResumeLens 工作台
-    ├── app/page.tsx
-    ├── app/report-export.ts       # 报告 Markdown / PDF 导出
-    └── app/api/backend/[...path]/ # 开发代理 → :8080
+├── jd-rag-resume-frontend/        # ResumeLens 工作台
+│   ├── app/page.tsx
+│   ├── app/report-export.ts       # 报告 Markdown / PDF 导出
+│   └── app/api/backend/[...path]/ # 开发代理 → :8080
+└── browser-extension/             # Chrome MV3 · BOSS JD 抓取与岗位库入口
 ```
 
 本地运行还可能包含 `mysql-9.7.0-winx64/`、`data/` 等**本机数据库文件**，请勿提交到 GitHub。

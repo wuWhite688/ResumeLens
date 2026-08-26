@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/analysis-histories")
 public class AnalysisHistoryController {
@@ -46,6 +48,23 @@ public class AnalysisHistoryController {
     @GetMapping("/{id}")
     public ApiResponse<AnalysisHistoryResponse> findById(@PathVariable Long id) {
         return ApiResponse.ok(analysisHistoryService.findById(id));
+    }
+
+    @GetMapping("/latest")
+    public ApiResponse<AnalysisHistoryResponse> findLatest(
+            @RequestParam Long resumeId,
+            @RequestParam Long jobDescriptionId
+    ) {
+        return ApiResponse.ok(
+                analysisHistoryService.findLatest(resumeId, jobDescriptionId).orElse(null)
+        );
+    }
+
+    @GetMapping("/latest-by-resume")
+    public ApiResponse<List<AnalysisHistoryResponse>> findLatestForEachJob(
+            @RequestParam Long resumeId
+    ) {
+        return ApiResponse.ok(analysisHistoryService.findLatestForEachJob(resumeId));
     }
 
     @PostMapping

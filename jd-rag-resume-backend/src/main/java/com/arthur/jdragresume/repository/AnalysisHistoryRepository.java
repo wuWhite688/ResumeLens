@@ -12,10 +12,36 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.List;
 import java.time.LocalDateTime;
 
 public interface AnalysisHistoryRepository extends JpaRepository<AnalysisHistory, Long> {
     Optional<AnalysisHistory> findByIdAndUserId(Long id, Long userId);
+
+    Optional<AnalysisHistory> findFirstByUser_IdAndResume_IdAndJobDescription_IdOrderByCreatedAtDesc(
+            Long userId,
+            Long resumeId,
+            Long jobDescriptionId
+    );
+
+    @Query("""
+            select history from AnalysisHistory history
+            join fetch history.resume
+            join fetch history.jobDescription
+            where history.user.id = :userId
+              and history.resume.id = :resumeId
+              and history.id = (
+                select max(latest.id) from AnalysisHistory latest
+                where latest.user.id = :userId
+                  and latest.resume.id = :resumeId
+                  and latest.jobDescription.id = history.jobDescription.id
+              )
+            order by history.createdAt desc
+            """)
+    List<AnalysisHistory> findLatestForEachJobByUserIdAndResumeId(
+            @Param("userId") Long userId,
+            @Param("resumeId") Long resumeId
+    );
 
     boolean existsByUser_IdAndResume_IdAndJobDescription_IdAndStatus(
             Long userId,

@@ -10,6 +10,12 @@ import java.util.Optional;
 public interface JobDescriptionRepository extends JpaRepository<JobDescription, Long> {
     Optional<JobDescription> findByIdAndUserId(Long id, Long userId);
 
+    Optional<JobDescription> findByUserIdAndSourcePlatformAndSourceJobId(
+            Long userId,
+            String sourcePlatform,
+            String sourceJobId
+    );
+
     long countByUserId(Long userId);
 
     Page<JobDescription> findByUserIdAndTitleContainingIgnoreCaseOrUserIdAndCompanyNameContainingIgnoreCase(
