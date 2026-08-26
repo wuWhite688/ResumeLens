@@ -39,7 +39,7 @@ public class GlobalExceptionHandler {
             case "FILE_SAVE_FAILED" -> HttpStatus.INTERNAL_SERVER_ERROR;
             case "AI_AUTH_FAILED", "AI_BALANCE_INSUFFICIENT", "AI_REQUEST_FAILED",
                  "AI_REQUEST_ERROR", "AI_REQUEST_INTERRUPTED", "AI_RESPONSE_EMPTY",
-                 "AI_RESPONSE_PARSE_FAILED" -> HttpStatus.BAD_GATEWAY;
+                 "AI_RESPONSE_PARSE_FAILED", "AI_RESPONSE_CITATION_INVALID" -> HttpStatus.BAD_GATEWAY;
             default -> HttpStatus.BAD_REQUEST;
         };
         return ResponseEntity.status(status)

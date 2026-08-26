@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.StringJoiner;
+import java.util.stream.Collectors;
 
 @Service
 public class AiAnalysisWorker {
@@ -79,7 +80,7 @@ public class AiAnalysisWorker {
             AiAnalysisResult result = resultParser.parse(aiClient.chat(
                     systemPrompt(),
                     userPrompt(resume, jobDescription, evidenceForPrompt(kept, hardSkills))
-            ));
+            ), kept.stream().map(RetrievedChunk::chunkIndex).collect(Collectors.toUnmodifiableSet()));
 
             BigDecimal matchScore = constrainScore(result.matchScore(), kept, hardSkills);
             String missingSkills = mergeMissingSkills(result.missingSkills(), hardSkills);
