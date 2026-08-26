@@ -3,6 +3,7 @@ package com.arthur.jdragresume.service;
 import com.arthur.jdragresume.dto.user.UserRequest;
 import com.arthur.jdragresume.dto.user.UserResponse;
 import com.arthur.jdragresume.entity.AppUser;
+import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -51,7 +52,12 @@ public class AppUserService {
     }
 
     private void applyRequest(AppUser user, UserRequest request) {
-        user.setUsername(request.username());
+        if (!user.getUsername().equals(request.username())) {
+            throw new BusinessException(
+                    "USERNAME_IMMUTABLE",
+                    "username cannot be changed because it identifies the active session"
+            );
+        }
         user.setEmail(request.email());
         user.setDisplayName(request.displayName());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
