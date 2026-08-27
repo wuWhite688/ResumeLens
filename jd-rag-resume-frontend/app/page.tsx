@@ -686,7 +686,7 @@ export default function Home() {
       setJobsTotal((total) => total + 1);
       setSelectedResumeId(createdResume.id);
       setSelectedJobId(createdJob.id);
-      setNotice("示例数据已保存，正在启动 Hybrid RAG 分析…");
+      setNotice("示例数据已保存，正在启动 RAG 匹配分析…");
       setBusy("analysis");
       const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
         method: "POST",
@@ -709,7 +709,7 @@ export default function Home() {
     }
     setBusy("analysis");
     setError("");
-    setNotice(`Hybrid RAG 正在检索（阈值过滤 + 关键词 boost），${generationProgressLabel(aiStatus)}`);
+    setNotice(`正在检索（语义阈值门控 + 关键词重排），${generationProgressLabel(aiStatus)}`);
     try {
       const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
         method: "POST",
@@ -835,7 +835,7 @@ export default function Home() {
         <div className="model-card">
           <span>当前模型组合</span>
           <strong>Alibaba GTE</strong>
-          <small>CLS pooling · Hybrid RAG</small>
+          <small>CLS pooling · 重排 + 阈值门控</small>
           <BackendStatus variant="model" />
         </div>
         <div className="user-card">
@@ -862,7 +862,7 @@ export default function Home() {
           <div className="overview-card"><span>已存简历</span><strong>{resumes.length}</strong><small>可在第 03 步选择</small></div>
           <div className="overview-card"><span>已存职位</span><strong>{effectiveJobsTotal}</strong><small>JD 双 Query 检索</small></div>
           <div className="overview-card"><span>分析记录</span><strong>{effectiveHistoryTotal}</strong><small>含证据链落库</small></div>
-          <div className="overview-card hot"><span>检索策略</span><strong>CLS · Hybrid</strong><small>minSim {minSimilarityText(aiStatus)} · Top-K {topKText(aiStatus)}</small></div>
+          <div className="overview-card hot"><span>检索策略</span><strong>CLS · 重排门控</strong><small>minSim {minSimilarityText(aiStatus)} · Top-K {topKText(aiStatus)}</small></div>
         </div>
 
         {(error || notice) && <div className={`toast ${error ? "error" : "success"}`}><span>{error ? "!" : "✓"}</span>{error || notice}<button onClick={() => { setError(""); setNotice(""); }}>×</button></div>}
@@ -1022,7 +1022,7 @@ export default function Home() {
                 <span className="badge-new">V2</span>
                 <div>
                   <strong>改进检索默认开启</strong>
-                  <p>GTE CLS 池化 · minSimilarity={minSimilarityText(aiStatus)} · Top-K={topKText(aiStatus)} · Hybrid + 双 Query · [chunk-N] 引用</p>
+                  <p>GTE CLS 池化 · minSimilarity={minSimilarityText(aiStatus)} · Top-K={topKText(aiStatus)} · 关键词重排 + 双 Query · [chunk-N] 引用</p>
                 </div>
               </div>
               <div className="pipeline">
@@ -1079,7 +1079,7 @@ export default function Home() {
                     <span><strong>{previewKept.length}</strong> 个有效证据</span>
                     <span><strong>{previewItems.length - previewKept.length}</strong> 个已过滤</span>
                     <span><strong>768</strong> 维向量</span>
-                    <span><strong>Hybrid</strong> 检索</span>
+                    <span><strong>重排</strong> 检索</span>
                   </div>
                 </div>
               </div>
@@ -1127,7 +1127,7 @@ export default function Home() {
                   <span><strong>{ragMeta?.kept ?? keptEvidence.length}</strong> 个有效证据</span>
                   <span><strong>{ragMeta?.filtered ?? Math.max(0, evidence.length - keptEvidence.length)}</strong> 个已过滤</span>
                   <span><strong>768</strong> 维向量</span>
-                  <span><strong>{ragMeta?.hybrid === false ? "语义" : "Hybrid"}</strong> 检索</span>
+                  <span><strong>{ragMeta?.hybrid === false ? "语义" : "重排"}</strong> 检索</span>
                 </div>
               </div>
             </div>
