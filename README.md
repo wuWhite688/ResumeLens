@@ -4,7 +4,7 @@
 
 基于 **本地向量检索 + 大模型生成** 的简历 / 职位（JD）智能匹配系统。
 
-后端用 Spring Boot 完成鉴权、持久化、异步分析与 Hybrid RAG；前端 ResumeLens 工作台覆盖「录入 → 匹配 → 证据链报告 → 导出」完整闭环。适合作为 Java 后端 + RAG 工程化作品集项目。
+后端用 Spring Boot 完成鉴权、持久化、异步分析与「关键词重排 + 语义阈值门控」的 RAG 检索；前端 ResumeLens 工作台覆盖「录入 → 匹配 → 证据链报告 → 导出」完整闭环。适合作为 Java 后端 + RAG 工程化作品集项目。
 
 | 层 | 技术 |
 |----|------|
@@ -21,8 +21,8 @@
 ## 界面预览
 
 > 以下截图均由本机真实运行的服务截取（Spring Boot + MySQL + 本地 ONNX 向量检索 + Next.js）。
-> 后端以 `AI_MOCK_ENABLED=true` 演示模式运行，因此**报告正文是 mock 生成的文案**，界面也如实标注了这一点；
-> 而**检索链路是真跑的**——分块、CLS 向量化、Lucene 召回、相似度与过阈判定都来自真实计算，截图中的 `raw=0.8845 · status=kept` 即真实检索元数据。
+> 后端以 `AI_MOCK_ENABLED=false` 连接真实 DeepSeek（`deepseek-chat`）运行，**报告正文由真实模型生成**，界面右上角标注了当前生成模型；
+> 检索链路同样是真跑的——分块、CLS 向量化、Lucene 召回、相似度与过阈判定都来自真实计算，截图中的 `raw=0.8573 · status=kept` 即真实检索元数据。
 
 **工作台 · 三步建立匹配任务**
 
@@ -54,7 +54,7 @@
 - **职位 JD**：创建、编辑、删除、**JSON 批量导入**（前端入口 + `POST /api/job-descriptions/import`，每用户最多 200 条）
 - **BOSS 浏览器扩展**：抓取当前 JD、允许提交前校正、选择已存简历并在扩展内查看分析；按 BOSS 岗位 ID 写入个人岗位库并复用历史结果（见 [`browser-extension/`](browser-extension/)）
 - **独立详情页**：`/resumes/[id]`、`/jobs/[id]`（查看 / 编辑 / 删除，复用已有 GET/PUT/DELETE）
-- **智能匹配**：异步分析任务（同一简历+JD 的 PENDING 去重；每用户最多 2 条进行中、10 分钟 10 次）；Hybrid RAG 召回证据；硬技能覆盖与服务端分数上限
+- **智能匹配**：异步分析任务（同一简历+JD 的 PENDING 去重；每用户最多 2 条进行中、10 分钟 10 次）；关键词重排 + 语义阈值门控召回证据；硬技能覆盖与服务端分数上限
 - **可解释报告**：匹配分、优势 / 缺口 / 建议 / 面试题、chunk 级证据与 `[chunk-N]` 引用
 - **导出**：匹配报告 **Markdown** 下载、**PDF**（浏览器打印另存为 PDF，完整中文）
 - **可靠性**：PENDING 超时回收、任务队列满保护、解析文本质量校验、列表分页最大 50
@@ -95,7 +95,7 @@ flowchart TD
     CRUD["简历 / JD CRUD"]
     SUBMIT["POST /api/analysis-histories/ai<br/>落库 PENDING 后立即返回"]
     W["AiAnalysisWorker（异步）"]
-    RAG["Hybrid RAG 检索<br/>见下方检索链路"]
+    RAG["RAG 检索<br/>关键词重排 + 语义阈值门控<br/>见下方检索链路"]
     GATE{"有 chunk 过阈？"}
     LLM["OpenAI 兼容 Chat<br/>DeepSeek / mock"]
     SCORE["constrainScore<br/>硬技能覆盖 + 分数上限"]
@@ -376,7 +376,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | `app.jwt.expiration-minutes` | 默认 15 |
 | `app.jwt.refresh-cookie-secure` | 默认 `false`，保证本地 HTTP 可登录；HTTPS 请设 `true` |
 | `ai.*` / 环境变量 | LLM 或 mock |
-| `app.rag.*` | 分块、Top-K、阈值、Hybrid、模型 URI、Lucene 目录 |
+| `app.rag.*` | 分块、Top-K、语义阈值、关键词重排、模型 URI、Lucene 目录 |
 | `app.analysis.pending-timeout-minutes` | 卡住的 PENDING 回收阈值 |
 | `app.analysis.max-pending-per-user` | 默认 2 |
 | `app.analysis.max-submits-per-window` | 默认 10 次 / 10 分钟 |
