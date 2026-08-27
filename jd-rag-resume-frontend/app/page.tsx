@@ -36,6 +36,7 @@ import {
   reportFilename,
 } from "./report-export";
 import { analysisPollTimeoutMs, pollAnalysisUntilSettled } from "./analysis-poll";
+import { coverRequirements, coverageSummary } from "./requirement-coverage";
 import { appendResumeUploadFields, prepareResumeUploadDraft, resumeFormFrom } from "./resume-upload";
 
 const EMPTY_RESUME_FORM = {
@@ -208,6 +209,7 @@ export default function Home() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [evidenceFilter, setEvidenceFilter] = useState<"kept" | "all" | "boost">("kept");
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [fetchedRequirements, setFetchedRequirements] = useState<{ jobId: number; text: string } | null>(null);
 
   function clearAuthenticatedView() {
     setToken("");
@@ -737,6 +739,39 @@ export default function Home() {
     return evidence.filter((item) => item.kept);
   }, [evidence, evidenceFilter]);
   const keptEvidence = useMemo(() => evidence.filter((item) => item.kept), [evidence]);
+  // JD 正文不在 Analysis 上。工作台里已加载的职位直接派生；null 表示这份历史报告的职位还得补拉。
+  const loadedRequirements = useMemo(() => {
+    const jobId = analysis?.jobDescriptionId;
+    if (!jobId) return "";
+    const loaded = jobs.find((item) => item.id === jobId);
+    return loaded ? loaded.requirements ?? "" : null;
+  }, [analysis?.jobDescriptionId, jobs]);
+
+  useEffect(() => {
+    const jobId = analysis?.jobDescriptionId;
+    if (!jobId || loadedRequirements !== null) return;
+    let active = true;
+    void apiRequest<Job>(`/api/job-descriptions/${jobId}`)
+      .then((job) => {
+        if (active) setFetchedRequirements({ jobId, text: job.requirements ?? "" });
+      })
+      .catch(() => {
+        // 职位可能已被删除，核对表静默省略即可，不打断报告阅读。
+        if (active) setFetchedRequirements({ jobId, text: "" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [analysis?.jobDescriptionId, loadedRequirements]);
+
+  // 补拉结果带上 jobId，切换报告时不会把上一份职位的要求错配到这一份。
+  const analysisRequirements = loadedRequirements
+    ?? (fetchedRequirements?.jobId === analysis?.jobDescriptionId ? fetchedRequirements.text : "");
+  const requirementCoverage = useMemo(
+    () => coverRequirements(analysisRequirements, evidence),
+    [analysisRequirements, evidence],
+  );
+  const requirementSummary = useMemo(() => coverageSummary(requirementCoverage), [requirementCoverage]);
   const parsedScore = Number(analysis?.matchScore);
   const score = Number.isFinite(parsedScore) ? parsedScore : 0;
   const analysisPending = analysis?.status === "PENDING";
@@ -1159,6 +1194,27 @@ export default function Home() {
               <article className="insight gap"><header><span>△</span><div><h3>能力缺口</h3><p>简历中尚未充分体现</p></div></header><ul>{missing.length ? missing.map((item, index) => <li key={index}>{item}</li>) : <li>未发现明显技能缺口</li>}</ul></article>
               <article className="insight improve"><header><span>↗</span><div><h3>优化建议</h3><p>让简历更靠近目标职位</p></div></header><ul>{suggestions.length ? suggestions.map((item, index) => <li key={index}>{item}</li>) : <li>当前简历信息较完整</li>}</ul></article>
             </div>
+            {requirementCoverage.length > 0 && (
+              <article className="rubric-panel">
+                <div>
+                  <span>JD CHECKLIST</span>
+                  <h3>岗位要求核对</h3>
+                  <strong className="coverage">{requirementSummary.covered} / {requirementSummary.total}</strong>
+                  <p className="caveat">按词面重叠比对 JD 要求与进入 prompt 的简历块，<b>不是模型判定</b>：同义表述（如「消息队列」与「Kafka」）匹配不上，未覆盖不等于候选人没有该能力。</p>
+                </div>
+                <ol>
+                  {requirementCoverage.map((row) => (
+                    <li key={row.no} className={row.covered ? "hit" : "miss"}>
+                      <b>{String(row.no).padStart(2, "0")}</b>
+                      <span>{row.text}</span>
+                      <em className="state" title={row.terms.length ? `命中词：${row.terms.join("、")}` : "与进入 prompt 的证据无词面重叠"}>
+                        {row.covered ? row.chunks.map((index) => `chunk-${index}`).join(" · ") : "未覆盖"}
+                      </em>
+                    </li>
+                  ))}
+                </ol>
+              </article>
+            )}
             {questions.length > 0 && <article className="questions"><div><span>INTERVIEW KIT</span><h3>建议准备的面试问题</h3></div><ol>{questions.map((item, index) => <li key={index}><b>{String(index + 1).padStart(2, "0")}</b>{item}</li>)}</ol></article>}
             <article className="evidence-panel">
               <header>

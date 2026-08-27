@@ -359,6 +359,22 @@ a.secondary {
 .questions li { display: flex; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid #edf0ec; color: #53686a; font-size: 10px; line-height: 1.55; }
 .questions li:last-child { border: 0; }
 .questions li b { color: #62a079; font-family: "ResumeSerif", Georgia, serif; }
+
+.rubric-panel { display: grid; grid-template-columns: 220px 1fr; gap: 25px; margin-top: 14px; padding: 21px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 3px 12px rgba(29,59,62,.025); }
+.rubric-panel > div > span { display: block; color: #63726f; font-size: 10px; font-weight: 800; letter-spacing: 1.4px; }
+.rubric-panel h3 { margin: 5px 0 0; font-family: "ResumeSerif", Georgia, serif; font-size: 18px; font-weight: 600; }
+.rubric-panel .coverage { display: block; margin-top: 11px; color: var(--mint-dark); font-family: "ResumeSerif", Georgia, serif; font-size: 26px; font-weight: 600; }
+.rubric-panel .caveat { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+.rubric-panel .caveat b { color: #7a6320; font-weight: 700; }
+.rubric-panel ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rubric-panel li { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; align-items: baseline; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid #edf0ec; color: #53686a; font-size: 11px; line-height: 1.6; }
+.rubric-panel li:last-child { padding-bottom: 0; border: 0; }
+.rubric-panel li b { color: #8a9996; font-family: "ResumeSerif", Georgia, serif; font-weight: 600; }
+.rubric-panel .state { padding: 2px 9px; border-radius: 999px; font-size: 10px; font-style: normal; font-weight: 700; white-space: nowrap; cursor: help; }
+.rubric-panel .hit .state { color: #246f4a; background: #e3f5e9; }
+.rubric-panel .miss .state { color: #7f8c88; background: #eef1ed; }
+.rubric-panel .miss > span { color: #7f8f8c; }
+@media (max-width: 840px) { .rubric-panel { grid-template-columns: 1fr; gap: 15px; } }
 /* Evidence panel: same light paper palette as insight/result cards (not dark navy block) */
 .evidence-panel { overflow: hidden; }
 .evidence-panel > header {
