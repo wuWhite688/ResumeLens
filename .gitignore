@@ -36,6 +36,7 @@ jd-rag-resume-frontend/build/*
 # Local environment files
 .env
 compose.env
+.env.*
 !.env.example
 !compose.env.example
 
