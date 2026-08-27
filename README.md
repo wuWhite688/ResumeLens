@@ -21,8 +21,8 @@
 ## 界面预览
 
 > 以下截图均由本机真实运行的服务截取（Spring Boot + MySQL + 本地 ONNX 向量检索 + Next.js）。
-> 后端以 `AI_MOCK_ENABLED=true` 演示模式运行，因此**报告正文是 mock 生成的文案**，界面也如实标注了这一点；
-> 而**检索链路是真跑的**——分块、CLS 向量化、Lucene 召回、相似度与过阈判定都来自真实计算，截图中的 `raw=0.8845 · status=kept` 即真实检索元数据。
+> 后端以 `AI_MOCK_ENABLED=false` 连接真实 DeepSeek（`deepseek-chat`）运行，**报告正文由真实模型生成**，界面右上角标注了当前生成模型；
+> 检索链路同样是真跑的——分块、CLS 向量化、Lucene 召回、相似度与过阈判定都来自真实计算，截图中的 `raw=0.8573 · status=kept` 即真实检索元数据。
 
 **工作台 · 三步建立匹配任务**
 
