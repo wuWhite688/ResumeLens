@@ -101,14 +101,17 @@ class ResumeDeleteCascadeMySqlTests {
                             resumeRepository,
                             resumeChunkRepository,
                             currentUserService,
-                            proxy(AppUserRepository.class, (ignored, method, args) -> {
-                                throw new UnsupportedOperationException(
+                            proxy(AppUserRepository.class, (ignored, method, args) -> switch (method.getName()) {
+                                case "findByIdForUpdate" -> Optional.of(rows.user());
+                                case "toString" -> "AppUserRepositoryMySqlTestDouble";
+                                default -> throw new UnsupportedOperationException(
                                         "Unexpected repository call: " + method.getName()
                                 );
                             }),
                             null,
                             tempDir.resolve("uploads").toString(),
-                            vectorIndex
+                            vectorIndex,
+                            com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service()
                     );
                     MockMvc mockMvc = MockMvcBuilders
                             .standaloneSetup(new ResumeController(resumeService))
@@ -165,13 +168,18 @@ class ResumeDeleteCascadeMySqlTests {
                 JobDescriptionService service = new JobDescriptionService(
                         repository,
                         new FixedCurrentUserService(rows.user()),
-                        proxy(AppUserRepository.class, (ignored, method, args) -> {
-                            throw new UnsupportedOperationException("Unexpected repository call: " + method.getName());
+                        proxy(AppUserRepository.class, (ignored, method, args) -> switch (method.getName()) {
+                            case "findByIdForUpdate" -> Optional.of(rows.user());
+                            case "toString" -> "AppUserRepositoryMySqlTestDouble";
+                            default -> throw new UnsupportedOperationException(
+                                    "Unexpected repository call: " + method.getName()
+                            );
                         }),
+                        com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service(),
                         200
                 );
                 MockMvc mockMvc = MockMvcBuilders
-                        .standaloneSetup(new JobDescriptionController(service))
+                        .standaloneSetup(new JobDescriptionController(service, null))
                         .build();
 
                 mockMvc.perform(delete("/api/job-descriptions/{id}", rows.jobId()))

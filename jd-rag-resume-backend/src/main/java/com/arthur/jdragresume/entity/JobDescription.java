@@ -56,6 +56,16 @@ public class JobDescription extends AuditableEntity {
     @Column(length = 64)
     private String contentFingerprint;
 
+    @Lob
+    @Column(name = "semantic_embedding", columnDefinition = "BLOB")
+    private byte[] semanticEmbedding;
+
+    @Column(name = "semantic_embedding_fingerprint", length = 64)
+    private String semanticEmbeddingFingerprint;
+
+    @Column(name = "semantic_embedding_model_key", length = 64)
+    private String semanticEmbeddingModelKey;
+
     private LocalDateTime lastSeenAt;
 
     public Long getId() {
@@ -148,6 +158,30 @@ public class JobDescription extends AuditableEntity {
 
     public void setContentFingerprint(String contentFingerprint) {
         this.contentFingerprint = contentFingerprint;
+    }
+
+    public byte[] getSemanticEmbedding() {
+        return semanticEmbedding;
+    }
+
+    public void setSemanticEmbedding(byte[] semanticEmbedding) {
+        this.semanticEmbedding = semanticEmbedding;
+    }
+
+    public String getSemanticEmbeddingFingerprint() {
+        return semanticEmbeddingFingerprint;
+    }
+
+    public void setSemanticEmbeddingFingerprint(String semanticEmbeddingFingerprint) {
+        this.semanticEmbeddingFingerprint = semanticEmbeddingFingerprint;
+    }
+
+    public String getSemanticEmbeddingModelKey() {
+        return semanticEmbeddingModelKey;
+    }
+
+    public void setSemanticEmbeddingModelKey(String semanticEmbeddingModelKey) {
+        this.semanticEmbeddingModelKey = semanticEmbeddingModelKey;
     }
 
     public LocalDateTime getLastSeenAt() {

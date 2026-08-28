@@ -121,7 +121,7 @@ class BrowserExtensionServiceTests {
         private JobCaptureResponse result;
 
         private FixedJobDescriptionService() {
-            super(null, null, null, 200);
+            super(null, null, null, SemanticEmbeddingTestSupport.service(), 200);
         }
 
         @Override
@@ -149,14 +149,14 @@ class BrowserExtensionServiceTests {
         private AnalysisHistoryResponse result;
 
         private FixedAiAnalysisService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null);
         }
 
         @Override
-        public AnalysisHistoryResponse analyze(AiAnalysisRequest request) {
+        public Submission submit(AiAnalysisRequest request) {
             calls += 1;
             lastRequest = request;
-            return result;
+            return new Submission(result, false);
         }
     }
 }

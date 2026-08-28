@@ -5,8 +5,6 @@ import com.arthur.jdragresume.dto.analysis.AnalysisHistoryResponse;
 import com.arthur.jdragresume.entity.AnalysisHistory;
 import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
-import com.arthur.jdragresume.entity.JobDescription;
-import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -17,8 +15,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class AiAnalysisService {
     private final CurrentUserService currentUserService;
-    private final ResumeService resumeService;
-    private final JobDescriptionService jobDescriptionService;
     private final AnalysisHistoryRepository analysisHistoryRepository;
     private final AnalysisSubmitGuard analysisSubmitGuard;
     private final AiAnalysisWorker aiAnalysisWorker;
@@ -26,16 +22,12 @@ public class AiAnalysisService {
 
     public AiAnalysisService(
             CurrentUserService currentUserService,
-            ResumeService resumeService,
-            JobDescriptionService jobDescriptionService,
             AnalysisHistoryRepository analysisHistoryRepository,
             AnalysisSubmitGuard analysisSubmitGuard,
             AiAnalysisWorker aiAnalysisWorker,
             @Qualifier("analysisTaskExecutor") TaskExecutor analysisTaskExecutor
     ) {
         this.currentUserService = currentUserService;
-        this.resumeService = resumeService;
-        this.jobDescriptionService = jobDescriptionService;
         this.analysisHistoryRepository = analysisHistoryRepository;
         this.analysisSubmitGuard = analysisSubmitGuard;
         this.aiAnalysisWorker = aiAnalysisWorker;
@@ -43,14 +35,20 @@ public class AiAnalysisService {
     }
 
     public AnalysisHistoryResponse analyze(AiAnalysisRequest request) {
-        AppUser user = currentUserService.getCurrentUser();
-        Resume resume = resumeService.getEntityForCurrentUser(request.resumeId());
-        JobDescription jobDescription = jobDescriptionService.getEntityForCurrentUser(request.jobDescriptionId());
-        if (resume.getRawText() == null || resume.getRawText().isBlank()) {
-            throw new BusinessException("RESUME_TEXT_EMPTY", "resume rawText is empty");
-        }
+        return submit(request).analysis();
+    }
 
-        AnalysisHistory saved = analysisSubmitGuard.admit(user, resume, jobDescription);
+    public Submission submit(AiAnalysisRequest request) {
+        AppUser user = currentUserService.getCurrentUser();
+        AnalysisSubmitGuard.Admission admission = analysisSubmitGuard.admit(
+                user,
+                request.resumeId(),
+                request.jobDescriptionId()
+        );
+        AnalysisHistory saved = admission.history();
+        if (admission.reusedPending()) {
+            return new Submission(AnalysisHistoryResponse.from(saved), true);
+        }
         try {
             analysisTaskExecutor.execute(() -> aiAnalysisWorker.process(saved.getId()));
         } catch (RuntimeException ex) {
@@ -59,6 +57,9 @@ public class AiAnalysisService {
             analysisHistoryRepository.save(saved);
             throw new BusinessException("ANALYSIS_QUEUE_FULL", "AI analysis task queue is full, please retry later");
         }
-        return AnalysisHistoryResponse.from(saved);
+        return new Submission(AnalysisHistoryResponse.from(saved), false);
+    }
+
+    public record Submission(AnalysisHistoryResponse analysis, boolean reusedPending) {
     }
 }

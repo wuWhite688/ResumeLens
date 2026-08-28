@@ -41,6 +41,7 @@ public class ResumeService {
     private final ResumeTextExtractor resumeTextExtractor;
     private final Path resumeUploadDir;
     private final LuceneVectorIndex vectorIndex;
+    private final SemanticEmbeddingService semanticEmbeddingService;
     @Value("${app.upload.max-resumes-per-user:30}")
     private int maxResumesPerUser = 30;
     @Value("${app.upload.max-stored-bytes-per-user:209715200}")
@@ -53,7 +54,8 @@ public class ResumeService {
             AppUserRepository appUserRepository,
             ResumeTextExtractor resumeTextExtractor,
             @Value("${app.upload.resume-dir:uploads/resumes}") String resumeUploadDir,
-            LuceneVectorIndex vectorIndex
+            LuceneVectorIndex vectorIndex,
+            SemanticEmbeddingService semanticEmbeddingService
     ) {
         this.resumeRepository = resumeRepository;
         this.resumeChunkRepository = resumeChunkRepository;
@@ -62,6 +64,7 @@ public class ResumeService {
         this.resumeTextExtractor = resumeTextExtractor;
         this.resumeUploadDir = Path.of(resumeUploadDir);
         this.vectorIndex = vectorIndex;
+        this.semanticEmbeddingService = semanticEmbeddingService;
     }
 
     @Transactional(readOnly = true)
@@ -92,6 +95,7 @@ public class ResumeService {
         Resume resume = new Resume();
         resume.setUser(user);
         applyRequest(resume, request);
+        semanticEmbeddingService.refresh(resume);
         return ResumeResponse.from(resumeRepository.save(resume));
     }
 
@@ -145,6 +149,7 @@ public class ResumeService {
             resume.setStoredFilePath(storedPath.toString());
             resume.setFileSize(file.getSize());
             resume.setRawText(parsedRawText);
+            semanticEmbeddingService.refresh(resume);
             return ResumeResponse.from(resumeRepository.save(resume));
         } catch (BusinessException ex) {
             if (stored) {
@@ -163,15 +168,18 @@ public class ResumeService {
 
     @Transactional
     public ResumeResponse update(Long id, ResumeRequest request) {
-        Resume resume = getEntityForCurrentUser(id);
+        AppUser user = lockCurrentUser();
+        Resume resume = getEntityForUser(id, user.getId());
         applyRequest(resume, request);
+        semanticEmbeddingService.refresh(resume);
         resumeChunkRepository.deleteByResumeId(id);
         return ResumeResponse.from(resumeRepository.save(resume));
     }
 
     @Transactional
     public void delete(Long id) {
-        Resume resume = getEntityForCurrentUser(id);
+        AppUser user = lockCurrentUser();
+        Resume resume = getEntityForUser(id, user.getId());
         Path storedFile = safeStoredFile(resume.getStoredFilePath());
         resumeChunkRepository.deleteByResumeId(id);
         resumeRepository.delete(resume);
@@ -188,7 +196,11 @@ public class ResumeService {
     @Transactional(readOnly = true)
     public Resume getEntityForCurrentUser(Long id) {
         AppUser user = currentUserService.getCurrentUser();
-        return resumeRepository.findByIdAndUserId(id, user.getId())
+        return getEntityForUser(id, user.getId());
+    }
+
+    private Resume getEntityForUser(Long id, Long userId) {
+        return resumeRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("resume", id));
     }
 

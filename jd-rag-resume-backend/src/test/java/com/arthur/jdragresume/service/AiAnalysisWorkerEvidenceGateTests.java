@@ -134,6 +134,8 @@ class AiAnalysisWorkerEvidenceGateTests {
         history.setUser(user);
         history.setResume(resume);
         history.setJobDescription(job);
+        history.setResumeFingerprint(ContentFingerprints.resume(resume));
+        history.setJobFingerprint(ContentFingerprints.job(job));
         history.setStatus(AnalysisStatus.PENDING);
         return history;
     }

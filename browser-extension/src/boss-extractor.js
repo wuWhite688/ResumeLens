@@ -49,6 +49,9 @@
       ".job-card-wrapper.active a[href*='/job_detail/']",
       ".job-list-box .job-card-wrapper.active a[href*='/job_detail/']",
       ".job-card-box.active a[href*='/job_detail/']",
+      ".job-card-wrapper.selected a[href*='/job_detail/']",
+      ".job-card-wrapper.cur a[href*='/job_detail/']",
+      "[aria-selected='true'] a[href*='/job_detail/']",
       "a[aria-current='true'][href*='/job_detail/']",
       "link[rel='canonical']",
     ],
@@ -68,13 +71,20 @@
     const sourceUrl = canonicalizeUrl(rawSourceUrl, locationHref);
     const extractedSourceJobId = sourceJobIdFromUrl(rawSourceUrl);
     const sourceJobId = extractedSourceJobId
-      || `fallback-${stableHash([sourceUrl, title, companyName].join("\n"))}`;
+      || `fallback-v2-${stableHash([
+        sourceUrl,
+        title,
+        companyName,
+        location,
+        description,
+        requirements,
+      ].map(normalizeText).join("\n"))}`;
     const warnings = [];
 
     if (!title) warnings.push("没有自动识别到职位名称，请手动补充");
     if (!companyName) warnings.push("没有自动识别到公司名称，请手动补充");
     if (description.length < 20) warnings.push("JD 正文过短，请确认已打开职位详情页");
-    if (!extractedSourceJobId) warnings.push("没有读到 BOSS 岗位 ID，本次会用页面指纹辅助查重");
+    if (!extractedSourceJobId) warnings.push("没有读到稳定的 BOSS 岗位 ID，本次会用完整岗位内容生成指纹；岗位内容变化时会作为新岗位保存");
 
     return {
       job: {
@@ -106,7 +116,7 @@
       const url = new URL(value);
       const match = url.pathname.match(/\/job_detail\/([^/]+?)(?:\.html)?\/?$/i);
       if (match && match[1]) return decodeURIComponent(match[1]);
-      for (const key of ["encryptJobId", "jobId", "securityId"]) {
+      for (const key of ["encryptJobId", "jobId"]) {
         const candidate = url.searchParams.get(key);
         if (candidate) return candidate.slice(0, 160);
       }

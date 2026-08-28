@@ -53,6 +53,10 @@ public class AiAnalysisWorker {
         if (history == null || history.getStatus() != AnalysisStatus.PENDING) {
             return;
         }
+        if (!ContentFingerprints.inputsMatch(history)) {
+            historyUpdateService.failIfPending(historyId, "分析输入已更新，请基于最新简历和岗位重新分析");
+            return;
+        }
         try {
             Resume resume = history.getResume();
             JobDescription jobDescription = history.getJobDescription();

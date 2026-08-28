@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analysisPollTimeoutMs, pollAnalysisUntilSettled } from "../app/analysis-poll.ts";
+import {
+  analysisPollTimeoutMs,
+  mergeLatestAnalysisSummaries,
+  pollAnalysisUntilSettled,
+} from "../app/analysis-poll.ts";
 import type { Analysis } from "../app/lib/api.ts";
 
 function analysis(status: Analysis["status"], id = 1): Analysis {
@@ -55,4 +59,32 @@ test("pollAnalysisUntilSettled reports timeout without throwing", async () => {
   });
   assert.equal(result.timedOut, true);
   assert.equal(result.analysis.status, "PENDING");
+  assert.equal(result.cancelled, false);
+});
+
+test("pollAnalysisUntilSettled cancels before a stale request fetches again", async () => {
+  let active = true;
+  let fetches = 0;
+  const result = await pollAnalysisUntilSettled(analysis("PENDING"), {
+    timeoutMs: 60_000,
+    sleep: async () => {
+      active = false;
+    },
+    shouldContinue: () => active,
+    fetchById: async () => {
+      fetches += 1;
+      return analysis("PENDING");
+    },
+  });
+
+  assert.equal(result.cancelled, true);
+  assert.equal(fetches, 0);
+});
+
+test("analysis summary merging never regresses a settled row back to pending", () => {
+  const pending = analysis("PENDING", 21);
+  const completed = { ...pending, status: "COMPLETED" as const, matchScore: 91 };
+
+  assert.deepEqual(mergeLatestAnalysisSummaries([completed], [pending]), [completed]);
+  assert.deepEqual(mergeLatestAnalysisSummaries([pending], [completed]), [completed]);
 });

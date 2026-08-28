@@ -124,7 +124,8 @@ class ResumeServiceUploadTransactionTests {
                 appUserRepository,
                 null,
                 uploadDir.toString(),
-                null
+                null,
+                SemanticEmbeddingTestSupport.service()
         );
     }
 

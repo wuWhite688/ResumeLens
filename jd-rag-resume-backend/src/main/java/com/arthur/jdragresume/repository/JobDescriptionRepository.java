@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface JobDescriptionRepository extends JpaRepository<JobDescription, Long> {
@@ -17,6 +18,8 @@ public interface JobDescriptionRepository extends JpaRepository<JobDescription, 
     );
 
     long countByUserId(Long userId);
+
+    List<JobDescription> findAllByUserId(Long userId);
 
     Page<JobDescription> findByUserIdAndTitleContainingIgnoreCaseOrUserIdAndCompanyNameContainingIgnoreCase(
             Long userIdForTitle,

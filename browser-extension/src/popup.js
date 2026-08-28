@@ -2,6 +2,7 @@
   "use strict";
 
   const RESUMELENS_MATCHES = ["http://localhost:3000/*", "http://127.0.0.1:3000/*"];
+  const requestGate = globalThis.ResumeLensPopupRequestGate.create();
   const state = {
     job: null,
     existingJob: null,
@@ -34,7 +35,13 @@
   });
 
   async function initialize() {
+    requestGate.cancel();
+    state.job = null;
+    state.existingJob = null;
+    state.bridgeTab = null;
+    state.latestAnalysis = null;
     setBusy(true);
+    hide(form);
     hide(element("open-resumelens"));
     hide(duplicate);
     hide(warnings);
@@ -84,28 +91,45 @@
   }
 
   async function loadPreviousAnalysis() {
+    const resumeId = Number(resumeSelect.value);
+    const token = requestGate.begin(resumeId);
     state.latestAnalysis = null;
     hide(reanalyzeButton);
-    const resumeId = Number(resumeSelect.value);
+    hide(element("result"));
     if (!state.existingJob || !resumeId || !state.bridgeTab) return;
+    duplicate.textContent = `这个岗位已在个人岗位库中（#${state.existingJob.id}），不会重复建档。`;
+    show(duplicate);
+    setStatus("正在读取当前简历的历史分析…", "working");
     try {
       const analysis = await bridgeCall("latestAnalysis", {
         resumeId,
         jobDescriptionId: state.existingJob.id,
       });
-      if (!analysis) return;
+      if (!requestIsCurrent(token)) return;
+      if (!analysis) {
+        duplicate.textContent = "这个岗位已在个人岗位库中，当前简历还没有分析记录。";
+        show(duplicate);
+        setStatus("可以为当前简历启动一次新分析", "success");
+        return;
+      }
       state.latestAnalysis = analysis;
       renderAnalysis(analysis);
       if (analysis.status === "COMPLETED") {
         duplicate.textContent = "这个岗位和当前简历以前分析过，已直接载入历史结果。";
         show(reanalyzeButton);
+        setStatus("已载入当前简历的历史分析", "success");
       } else if (analysis.status === "PENDING") {
         duplicate.textContent = "这个岗位正在分析，已接回现有任务，不会重复提交。";
-        void pollAnalysis(analysis);
+        void pollAnalysis(analysis, token).catch((reason) => {
+          if (requestIsCurrent(token)) setStatus(friendlyError(reason), "error");
+        });
+      } else {
+        setStatus(analysis.summary || "上次分析失败，可以重新分析", "error");
+        show(reanalyzeButton);
       }
       show(duplicate);
     } catch (reason) {
-      setStatus(friendlyError(reason), "error");
+      if (requestIsCurrent(token)) setStatus(friendlyError(reason), "error");
     }
   }
 
@@ -118,14 +142,17 @@
       return;
     }
 
+    const resumeId = Number(resumeSelect.value);
+    const token = requestGate.begin(resumeId);
     setBusy(true);
     setStatus(forceReanalyze ? "正在重新提交分析…" : "正在保存岗位并启动分析…", "working");
     try {
       const response = await bridgeCall("analyze", {
-        resumeId: Number(resumeSelect.value),
+        resumeId,
         forceReanalyze,
         job: jobFromForm(),
       });
+      if (!requestIsCurrent(token)) return;
       state.existingJob = response.job;
       state.latestAnalysis = response.analysis;
       duplicate.textContent = response.reusedAnalysis
@@ -136,24 +163,30 @@
       show(duplicate);
       renderAnalysis(response.analysis);
       if (response.analysis.status === "PENDING") {
-        await pollAnalysis(response.analysis);
+        void pollAnalysis(response.analysis, token).catch((reason) => {
+          if (requestIsCurrent(token)) setStatus(friendlyError(reason), "error");
+        });
       } else {
         setStatus(response.reusedAnalysis ? "已载入历史分析" : "分析完成", "success");
       }
     } catch (reason) {
-      setStatus(friendlyError(reason), "error");
+      if (requestIsCurrent(token)) setStatus(friendlyError(reason), "error");
     } finally {
-      setBusy(false);
+      if (requestIsCurrent(token)) setBusy(false);
     }
   }
 
-  async function pollAnalysis(initial) {
+  async function pollAnalysis(initial, token) {
     let current = initial;
+    if (!requestIsCurrent(token)) return null;
     renderAnalysis(current);
     for (let attempt = 0; attempt < 300 && current.status === "PENDING"; attempt += 1) {
       setStatus(`分析进行中${"·".repeat((attempt % 3) + 1)}`, "working");
       await delay(2_000);
-      current = await bridgeCall("getAnalysis", { id: current.id });
+      if (!requestIsCurrent(token)) return null;
+      const next = await bridgeCall("getAnalysis", { id: current.id });
+      if (!requestIsCurrent(token)) return null;
+      current = next;
       state.latestAnalysis = current;
       renderAnalysis(current);
     }
@@ -165,7 +198,7 @@
     } else {
       setStatus("分析仍在后台跑，稍后重新打开扩展就能接着看", "working");
     }
-    return current;
+    return requestIsCurrent(token) ? current : null;
   }
 
   async function bridgeCall(action, payload) {
@@ -192,7 +225,7 @@
 
   async function activeBossTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !Number.isInteger(tab.id) || !/^https:\/\/([^.]+\.)?zhipin\.com\//i.test(tab.url || "")) {
+    if (!tab || !Number.isInteger(tab.id) || !/^https:\/\/(?:[^./]+\.)*zhipin\.com\//i.test(tab.url || "")) {
       throw new Error("请先打开一个 BOSS 直聘职位详情页");
     }
     return tab;
@@ -302,9 +335,17 @@
 
   function setBusy(value) {
     state.busy = value;
+    for (const id of ["title", "companyName", "location", "employmentType", "description", "requirements"]) {
+      element(id).disabled = value;
+    }
     analyzeButton.disabled = value || !resumeSelect.value;
     reanalyzeButton.disabled = value;
+    resumeSelect.disabled = value;
     element("refresh-job").disabled = value;
+  }
+
+  function requestIsCurrent(token) {
+    return requestGate.isCurrent(token, Number(resumeSelect.value));
   }
 
   function setStatus(message, tone) {

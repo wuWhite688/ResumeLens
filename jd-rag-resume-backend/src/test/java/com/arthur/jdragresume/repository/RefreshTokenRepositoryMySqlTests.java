@@ -1,19 +1,27 @@
 package com.arthur.jdragresume.repository;
 
+import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
+import com.arthur.jdragresume.entity.AnalysisHistory;
+import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
+import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.RefreshToken;
+import com.arthur.jdragresume.entity.Resume;
+import com.arthur.jdragresume.service.ContentFingerprints;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -23,9 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * findCleanupCandidateIds 是 JPQL，之前只有替身仓库的单元测试覆盖——那种测试不会让
- * Hibernate 解析查询，字段改名或语法出错要等到应用启动创建 EntityManagerFactory 时才暴露。
- * 这里用 @DataJpaTest 对真实 mysql:9.7.0 跑，既验证查询能被解析，也验证它选出的正是该删的行。
+ * 真实 MySQL repository slice：让 Hibernate 解析 JPQL、Flyway 安装真实索引，并验证
+ * refresh token 清理与当前输入版本分析查询的语义；替身仓库单测覆盖不到这些边界。
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -53,6 +60,14 @@ class RefreshTokenRepositoryMySqlTests {
     private AppUserRepository appUserRepository;
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
+    @Autowired
+    private ResumeRepository resumeRepository;
+    @Autowired
+    private JobDescriptionRepository jobDescriptionRepository;
+    @Autowired
+    private AnalysisHistoryRepository analysisHistoryRepository;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private AppUser user;
 
@@ -114,6 +129,77 @@ class RefreshTokenRepositoryMySqlTests {
         assertEquals(2, firstBatch.size());
     }
 
+    @Test
+    void latestAnalysisQueryReturnsOnlyTheNewestCurrentInputVersion() {
+        Resume resume = new Resume();
+        resume.setUser(user);
+        resume.setTitle("Backend resume");
+        resume.setCandidateName("Arthur");
+        resume.setRawText("Java Spring Boot");
+        resume = resumeRepository.saveAndFlush(resume);
+
+        JobDescription job = new JobDescription();
+        job.setUser(user);
+        job.setTitle("Java engineer");
+        job.setCompanyName("Example Inc");
+        job.setDescription("Build backend APIs");
+        job.setRequirements("Java");
+        job.setContentFingerprint(ContentFingerprints.job(job));
+        job = jobDescriptionRepository.saveAndFlush(job);
+
+        String resumeFingerprint = ContentFingerprints.resume(resume);
+        String jobFingerprint = ContentFingerprints.job(job);
+        AnalysisHistory current = saveAnalysis(
+                resume,
+                job,
+                resumeFingerprint,
+                jobFingerprint,
+                new BigDecimal("88.00")
+        );
+        saveAnalysis(resume, job, resumeFingerprint, "stale-job-version", new BigDecimal("99.00"));
+
+        List<AnalysisHistorySummaryResponse> latest = analysisHistoryRepository
+                .findLatestCurrentForEachJobByUserIdAndResumeId(
+                        user.getId(),
+                        resume.getId(),
+                        resumeFingerprint
+                );
+
+        assertEquals(1, latest.size());
+        assertEquals(current.getId(), latest.getFirst().id());
+        assertEquals(new BigDecimal("88.00"), latest.getFirst().matchScore());
+        assertEquals(
+                current.getId(),
+                analysisHistoryRepository
+                        .findFirstByUser_IdAndResume_IdAndJobDescription_IdAndResumeFingerprintAndJobFingerprintOrderByIdDesc(
+                                user.getId(),
+                                resume.getId(),
+                                job.getId(),
+                                resumeFingerprint,
+                                jobFingerprint
+                        )
+                        .orElseThrow()
+                        .getId()
+        );
+    }
+
+    @Test
+    void latestAnalysisCompositeIndexIsInstalledByFlyway() {
+        List<String> columns = jdbcTemplate.queryForList(
+                """
+                        select column_name
+                        from information_schema.statistics
+                        where table_schema = database()
+                          and table_name = 'analysis_history'
+                          and index_name = 'idx_analysis_latest'
+                        order by seq_in_index
+                        """,
+                String.class
+        );
+
+        assertEquals(List.of("user_id", "resume_id", "job_description_id", "id"), columns);
+    }
+
     private RefreshToken saveToken(String label, LocalDateTime expiresAt, LocalDateTime revokedAt) {
         String suffix = UUID.randomUUID().toString().replace("-", "");
         RefreshToken token = new RefreshToken();
@@ -123,5 +209,24 @@ class RefreshTokenRepositoryMySqlTests {
         token.setExpiresAt(expiresAt);
         token.setRevokedAt(revokedAt);
         return refreshTokenRepository.saveAndFlush(token);
+    }
+
+    private AnalysisHistory saveAnalysis(
+            Resume resume,
+            JobDescription job,
+            String resumeFingerprint,
+            String jobFingerprint,
+            BigDecimal score
+    ) {
+        AnalysisHistory history = new AnalysisHistory();
+        history.setUser(user);
+        history.setResume(resume);
+        history.setJobDescription(job);
+        history.setResumeFingerprint(resumeFingerprint);
+        history.setJobFingerprint(jobFingerprint);
+        history.setMatchScore(score);
+        history.setStatus(AnalysisStatus.COMPLETED);
+        history.setSummary("test analysis");
+        return analysisHistoryRepository.saveAndFlush(history);
     }
 }

@@ -5,6 +5,7 @@ import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.analysis.AiAnalysisRequest;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryRequest;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryResponse;
+import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.service.AiAnalysisService;
 import com.arthur.jdragresume.service.AnalysisHistoryService;
 import jakarta.validation.Valid;
@@ -61,7 +62,7 @@ public class AnalysisHistoryController {
     }
 
     @GetMapping("/latest-by-resume")
-    public ApiResponse<List<AnalysisHistoryResponse>> findLatestForEachJob(
+    public ApiResponse<List<AnalysisHistorySummaryResponse>> findLatestForEachJob(
             @RequestParam Long resumeId
     ) {
         return ApiResponse.ok(analysisHistoryService.findLatestForEachJob(resumeId));

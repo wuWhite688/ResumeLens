@@ -27,9 +27,9 @@ jobs:
           cache: maven
 
       # GitHub 托管的 ubuntu runner 自带 Docker，因此 Testcontainers 用例
-      # （ResumeDeleteCascadeMySqlTests，真起 mysql:9.7.0 验证外键级联删除）
+      # （外键级联、Flyway 索引和 repository JPQL，真起 mysql:9.7.0）
       # 会在这里真实执行。开发者本机 Windows 的 PATH 里没有 docker 命令，
-      # 这两条用例只会被静默跳过 —— CI 是它们唯一稳定跑到的地方。
+      # 这些用例只会被静默跳过 —— CI 是它们唯一稳定跑到的地方。
       - name: 构建与测试
         working-directory: jd-rag-resume-backend
         run: ./mvnw -B --no-transfer-progress verify
@@ -71,3 +71,33 @@ jobs:
       - name: 测试（含生产构建）
         working-directory: jd-rag-resume-frontend
         run: npm test
+
+  extension:
+    name: Chrome 扩展 · Node 22
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 测试
+        working-directory: browser-extension
+        run: npm test
+
+      - name: 打包
+        working-directory: browser-extension
+        run: npm run pack
+
+      - name: 校验安装包
+        run: unzip -t browser-extension/dist/resumelens-browser-extension-v*.zip
+
+      - name: 上传扩展安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: resumelens-browser-extension
+          path: browser-extension/dist/resumelens-browser-extension-v*.zip
+          retention-days: 7

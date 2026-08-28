@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, FormEvent } from "react";
 import { BackendStatus } from "./components/BackendStatus";
 import {
   AUTH_EXPIRED_EVENT,
   SAMPLE_BULK_JOBS,
   type Analysis,
+  type AnalysisSummary,
   type AiStatus,
   type AuthResponse,
   type Job,
+  type JobSemanticMatch,
   type PageData,
   type Resume,
   type User,
@@ -35,9 +37,14 @@ import {
   parseRagMeta,
   reportFilename,
 } from "./report-export";
-import { analysisPollTimeoutMs, pollAnalysisUntilSettled } from "./analysis-poll";
+import {
+  analysisPollTimeoutMs,
+  mergeLatestAnalysisSummaries,
+  pollAnalysisUntilSettled,
+} from "./analysis-poll";
 import { coverRequirements, coverageSummary } from "./requirement-coverage";
 import { appendResumeUploadFields, prepareResumeUploadDraft, resumeFormFrom } from "./resume-upload";
+import { semanticAnalysisTargets } from "./semantic-ranking";
 
 const EMPTY_RESUME_FORM = {
   title: "",
@@ -57,25 +64,33 @@ const EMPTY_JOB_FORM = {
 const HISTORY_PREVIEW_LIMIT = 8;
 const HISTORY_PAGE_SIZE = 20;
 const JOB_PAGE_SIZE = 50;
-type JobSort = "recent" | "score" | "analyzed";
+type JobSort = "recent" | "semantic" | "score" | "analyzed";
 type JobFilter = "all" | "unanalyzed";
+type JobAnalysesStatus = "idle" | "loading" | "ready" | "error";
+type JobSemanticStatus = "idle" | "loading" | "ready" | "error";
+type AnalysisRun = { generation: number; resumeId: number; jobId: number };
 
-function analysisTimestamp(item?: Analysis) {
+function analysisTimestamp(item?: AnalysisSummary) {
   const timestamp = item?.createdAt ? Date.parse(item.createdAt) : Number.NaN;
   return Number.isFinite(timestamp) ? timestamp : -1;
 }
 
-function analysisScore(item?: Analysis) {
+function analysisScore(item?: AnalysisSummary) {
   const score = Number(item?.matchScore);
   return item?.status === "COMPLETED" && Number.isFinite(score) ? score : -1;
 }
 
-function jobScoreLabel(item?: Analysis) {
+function jobScoreLabel(item?: AnalysisSummary) {
   if (!item) return "未分析";
   if (item.status === "PENDING") return "分析中";
   if (item.status === "FAILED") return "失败";
   const score = Number(item.matchScore);
   return Number.isFinite(score) ? `${score.toFixed(0)} 分` : "—";
+}
+
+function jobTimestamp(item: Job) {
+  const timestamp = item.createdAt ? Date.parse(item.createdAt) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : -1;
 }
 
 function renderCitedText(text: string) {
@@ -187,8 +202,15 @@ export default function Home() {
   const [jobsLoadingMore, setJobsLoadingMore] = useState(false);
   const [jobSort, setJobSort] = useState<JobSort>("recent");
   const [jobFilter, setJobFilter] = useState<JobFilter>("all");
-  const [jobLatestAnalyses, setJobLatestAnalyses] = useState<Analysis[]>([]);
+  const [jobLatestAnalyses, setJobLatestAnalyses] = useState<AnalysisSummary[]>([]);
   const [jobAnalysesResumeId, setJobAnalysesResumeId] = useState<number | null>(null);
+  const [jobAnalysesStatus, setJobAnalysesStatus] = useState<JobAnalysesStatus>("idle");
+  const [jobAnalysesError, setJobAnalysesError] = useState("");
+  const [jobSemanticMatches, setJobSemanticMatches] = useState<JobSemanticMatch[]>([]);
+  const [jobSemanticResumeId, setJobSemanticResumeId] = useState<number | null>(null);
+  const [jobSemanticStatus, setJobSemanticStatus] = useState<JobSemanticStatus>("idle");
+  const [jobSemanticError, setJobSemanticError] = useState("");
+  const [topMatchCount, setTopMatchCount] = useState(5);
   const [history, setHistory] = useState<Analysis[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyPage, setHistoryPage] = useState(0);
@@ -209,36 +231,107 @@ export default function Home() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [evidenceFilter, setEvidenceFilter] = useState<"kept" | "all" | "boost">("kept");
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const analysisRunSequence = useRef(0);
+  const activeAnalysisRun = useRef<AnalysisRun | null>(null);
+  const jobAnalysesRequestGeneration = useRef(0);
+  const jobSemanticRequestGeneration = useRef(0);
   const [fetchedRequirements, setFetchedRequirements] = useState<{ jobId: number; text: string } | null>(null);
 
+  const chooseResume = useCallback((next: number | "") => {
+    const run = activeAnalysisRun.current;
+    if (run && run.resumeId !== next) activeAnalysisRun.current = null;
+    jobAnalysesRequestGeneration.current += 1;
+    jobSemanticRequestGeneration.current += 1;
+    setJobLatestAnalyses([]);
+    setJobAnalysesResumeId(null);
+    setJobAnalysesStatus(next ? "loading" : "idle");
+    setJobAnalysesError("");
+    setJobSemanticMatches([]);
+    setJobSemanticResumeId(null);
+    setJobSemanticStatus("idle");
+    setJobSemanticError("");
+    setAnalysis((current) => current && current.resumeId !== next ? null : current);
+    setSelectedResumeId(next);
+  }, []);
+
+  const chooseJob = useCallback((next: number | "") => {
+    const run = activeAnalysisRun.current;
+    if (run && run.jobId !== next) activeAnalysisRun.current = null;
+    setAnalysis((current) => current && current.jobDescriptionId !== next ? null : current);
+    setSelectedJobId(next);
+  }, []);
+
   function clearAuthenticatedView() {
+    activeAnalysisRun.current = null;
+    jobAnalysesRequestGeneration.current += 1;
+    jobSemanticRequestGeneration.current += 1;
     setToken("");
     setUser(null);
     setAnalysis(null);
+    setResumes([]);
     setJobs([]);
     setJobsTotal(0);
     setJobsPage(0);
     setJobLatestAnalyses([]);
     setJobAnalysesResumeId(null);
+    setJobAnalysesStatus("idle");
+    setJobAnalysesError("");
+    setJobSemanticMatches([]);
+    setJobSemanticResumeId(null);
+    setJobSemanticStatus("idle");
+    setJobSemanticError("");
     setHistory([]);
     setHistoryTotal(0);
     setHistoryPage(0);
     setHistoryExpanded(false);
+    setSelectedResumeId("");
+    setSelectedJobId("");
+    setEditingResumeId(null);
+    setEditingJobId(null);
+    setFile(null);
+    setResumeForm({ ...SAMPLE_RESUME });
+    setJobForm({ ...SAMPLE_JOB });
+    setAuth({ username: "", password: "", email: "", displayName: "" });
+    setBulkImportText(JSON.stringify(SAMPLE_BULK_JOBS, null, 2));
+    setShowBulkImport(false);
+    setNotice("");
   }
 
-  async function waitForAnalysis(initial: Analysis) {
-    const { analysis: current, timedOut } = await pollAnalysisUntilSettled(initial, {
+  function invalidateSemanticMatches() {
+    jobSemanticRequestGeneration.current += 1;
+    setJobSemanticMatches([]);
+    setJobSemanticResumeId(null);
+    setJobSemanticStatus("idle");
+    setJobSemanticError("");
+  }
+
+  function beginAnalysisRun(resumeId: number, jobId: number) {
+    const run = { generation: ++analysisRunSequence.current, resumeId, jobId };
+    activeAnalysisRun.current = run;
+    return run;
+  }
+
+  function isCurrentAnalysisRun(run: AnalysisRun) {
+    return activeAnalysisRun.current?.generation === run.generation;
+  }
+
+  function acceptAnalysisProgress(next: Analysis, run: AnalysisRun) {
+    if (!isCurrentAnalysisRun(run)) return;
+    setAnalysis(next);
+    setHistory((items) => [next, ...items.filter((item) => item.id !== next.id)]);
+    setJobLatestAnalyses((items) => mergeLatestAnalysisSummaries(items, [next]));
+  }
+
+  async function waitForAnalysis(initial: Analysis, run: AnalysisRun) {
+    const { analysis: current, timedOut, cancelled } = await pollAnalysisUntilSettled(initial, {
       timeoutMs: analysisPollTimeoutMs(aiStatus?.pendingTimeoutMinutes),
       fetchById: (id) => apiRequest<Analysis>(`/api/analysis-histories/${id}`),
-      onProgress: (next) => {
-        setAnalysis(next);
-        setHistory((items) => [next, ...items.filter((item) => item.id !== next.id)]);
-        if (next.resumeId === selectedResumeId) {
-          setJobLatestAnalyses((items) => [next, ...items.filter((item) => item.jobDescriptionId !== next.jobDescriptionId)]);
-        }
-      },
+      shouldContinue: () => isCurrentAnalysisRun(run),
+      onProgress: (next) => acceptAnalysisProgress(next, run),
     });
 
+    if (cancelled || !isCurrentAnalysisRun(run)) return null;
+    activeAnalysisRun.current = null;
     if (timedOut) {
       setNotice("分析仍在后台运行，可稍后在历史记录中查看结果");
       return current;
@@ -260,41 +353,93 @@ export default function Home() {
       setJobs(jobPage.content);
       setJobsTotal(jobPage.totalElements);
       setJobsPage(0);
+      jobSemanticRequestGeneration.current += 1;
+      setJobSemanticMatches([]);
+      setJobSemanticResumeId(null);
+      setJobSemanticStatus("idle");
+      setJobSemanticError("");
       setHistory(historyPage.content);
       setHistoryTotal(historyPage.totalElements);
       setHistoryPage(0);
-      if (!selectedResumeId && resumePage.content[0]) setSelectedResumeId(resumePage.content[0].id);
-      if (!selectedJobId && jobPage.content[0]) setSelectedJobId(jobPage.content[0].id);
+      if (!selectedResumeId && resumePage.content[0]) chooseResume(resumePage.content[0].id);
+      if (!selectedJobId && jobPage.content[0]) chooseJob(jobPage.content[0].id);
       if (!analysis && historyPage.content[0]?.status === "COMPLETED") setAnalysis(historyPage.content[0]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "无法连接后端");
     } finally {
       setBusy("");
     }
-  }, [analysis, selectedJobId, selectedResumeId]);
+  }, [analysis, chooseJob, chooseResume, selectedJobId, selectedResumeId]);
+
+  const loadJobAnalyses = useCallback(async (resumeId: number) => {
+    const generation = ++jobAnalysesRequestGeneration.current;
+    await Promise.resolve();
+    if (generation !== jobAnalysesRequestGeneration.current) return;
+    setJobLatestAnalyses([]);
+    setJobAnalysesResumeId(null);
+    setJobAnalysesStatus("loading");
+    setJobAnalysesError("");
+    try {
+      const items = await apiRequest<AnalysisSummary[]>(
+        `/api/analysis-histories/latest-by-resume?resumeId=${resumeId}`,
+      );
+      if (generation !== jobAnalysesRequestGeneration.current) return;
+      setJobLatestAnalyses((current) => mergeLatestAnalysisSummaries(items, current));
+      setJobAnalysesResumeId(resumeId);
+      setJobAnalysesStatus("ready");
+    } catch (reason) {
+      if (generation !== jobAnalysesRequestGeneration.current) return;
+      const message = reason instanceof Error ? reason.message : "无法读取职位匹配分";
+      setJobAnalysesResumeId(resumeId);
+      setJobAnalysesStatus("error");
+      setJobAnalysesError(message);
+      setError(message);
+    }
+  }, []);
+
+  const loadSemanticMatches = useCallback(async (resumeId: number) => {
+    const generation = ++jobSemanticRequestGeneration.current;
+    setJobSemanticMatches([]);
+    setJobSemanticResumeId(null);
+    setJobSemanticStatus("loading");
+    setJobSemanticError("");
+    try {
+      const items = await apiRequest<JobSemanticMatch[]>(
+        `/api/job-descriptions/matches?resumeId=${resumeId}&limit=200`,
+      );
+      if (generation !== jobSemanticRequestGeneration.current) return null;
+      setJobSemanticMatches(items);
+      setJobSemanticResumeId(resumeId);
+      setJobSemanticStatus("ready");
+      // The match endpoint always covers the complete per-user library (maximum 200).
+      setJobs(items.map((item) => item.job));
+      setJobsTotal(items.length);
+      setJobsPage(Math.max(0, Math.ceil(items.length / JOB_PAGE_SIZE) - 1));
+      return items;
+    } catch (reason) {
+      if (generation !== jobSemanticRequestGeneration.current) return null;
+      const message = reason instanceof Error ? reason.message : "无法完成职位向量粗排";
+      setJobSemanticResumeId(resumeId);
+      setJobSemanticStatus("error");
+      setJobSemanticError(message);
+      setError(message);
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
-    if (!token || !selectedResumeId) {
-      return;
-    }
-    let active = true;
-    void apiRequest<Analysis[]>(`/api/analysis-histories/latest-by-resume?resumeId=${selectedResumeId}`)
-      .then((items) => {
-        if (active) {
-          setJobLatestAnalyses(items);
-          setJobAnalysesResumeId(selectedResumeId);
-        }
-      })
-      .catch((reason) => {
-        if (active) {
-          setJobAnalysesResumeId(selectedResumeId);
-          setError(reason instanceof Error ? reason.message : "无法读取职位匹配分");
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [selectedResumeId, token]);
+    if (!token || !selectedResumeId) return;
+    const timer = window.setTimeout(() => void loadJobAnalyses(selectedResumeId), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadJobAnalyses, selectedResumeId, token]);
+
+  useEffect(() => {
+    if (!token || !selectedResumeId || jobSort !== "semantic") return;
+    if (jobSemanticResumeId === selectedResumeId
+        && (jobSemanticStatus === "loading" || jobSemanticStatus === "ready")) return;
+    const timer = window.setTimeout(() => void loadSemanticMatches(Number(selectedResumeId)), 0);
+    return () => window.clearTimeout(timer);
+  }, [jobSemanticResumeId, jobSemanticStatus, jobSort, loadSemanticMatches, selectedResumeId, token]);
 
   async function loadMoreJobs() {
     if (jobsLoadingMore || jobs.length >= jobsTotal) return;
@@ -373,8 +518,8 @@ export default function Home() {
     const jobIdParam = Number(params.get("jobId"));
     const analysisIdParam = Number(params.get("analysisId"));
     const locationTimer = window.setTimeout(() => {
-      if (Number.isFinite(resumeIdParam) && resumeIdParam > 0) setSelectedResumeId(resumeIdParam);
-      if (Number.isFinite(jobIdParam) && jobIdParam > 0) setSelectedJobId(jobIdParam);
+      if (Number.isFinite(resumeIdParam) && resumeIdParam > 0) chooseResume(resumeIdParam);
+      if (Number.isFinite(jobIdParam) && jobIdParam > 0) chooseJob(jobIdParam);
     }, 0);
 
     const handleAuthExpired = () => {
@@ -464,7 +609,7 @@ export default function Home() {
       setEditingResumeId(detail.id);
       setFile(null);
       setResumeForm(resumeFormFrom(detail));
-      setSelectedResumeId(detail.id);
+      chooseResume(detail.id);
       setNotice(`正在编辑简历 #${detail.id}，保存后将更新并失效旧向量索引`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "加载简历失败");
@@ -483,7 +628,7 @@ export default function Home() {
       description: item.description || "",
       requirements: item.requirements || "",
     });
-    setSelectedJobId(item.id);
+    chooseJob(item.id);
     setNotice(`正在编辑职位 #${item.id}`);
   }
 
@@ -526,7 +671,8 @@ export default function Home() {
         setResumes((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
         setNotice("简历已保存，等待向量检索");
       }
-      setSelectedResumeId(saved.id);
+      chooseResume(saved.id);
+      invalidateSemanticMatches();
       setEditingResumeId(null);
       setFile(null);
     } catch (reason) {
@@ -555,7 +701,8 @@ export default function Home() {
         setJobsTotal((total) => total + 1);
         setNotice("职位 JD 已保存，可以开始匹配");
       }
-      setSelectedJobId(saved.id);
+      chooseJob(saved.id);
+      invalidateSemanticMatches();
       setEditingJobId(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "JD 保存失败");
@@ -571,7 +718,7 @@ export default function Home() {
     try {
       await apiRequest<void>(`/api/resumes/${id}`, { method: "DELETE" });
       setResumes((items) => items.filter((item) => item.id !== id));
-      if (selectedResumeId === id) setSelectedResumeId("");
+      if (selectedResumeId === id) chooseResume("");
       if (editingResumeId === id) resetResumeEditor();
       if (analysis?.resumeId === id) setAnalysis(null);
       setNotice(`简历 #${id} 已删除`);
@@ -590,9 +737,10 @@ export default function Home() {
       await apiRequest<void>(`/api/job-descriptions/${id}`, { method: "DELETE" });
       setJobs((items) => items.filter((item) => item.id !== id));
       setJobsTotal((total) => Math.max(0, total - 1));
-      if (selectedJobId === id) setSelectedJobId("");
+      if (selectedJobId === id) chooseJob("");
       if (editingJobId === id) resetJobEditor();
       if (analysis?.jobDescriptionId === id) setAnalysis(null);
+      invalidateSemanticMatches();
       setNotice(`职位 #${id} 已删除`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "删除职位失败");
@@ -620,7 +768,8 @@ export default function Home() {
         });
       });
       setJobsTotal((total) => total + imported.length);
-      if (imported[0]) setSelectedJobId(imported[0].id);
+      if (imported[0]) chooseJob(imported[0].id);
+      invalidateSemanticMatches();
       setShowBulkImport(false);
       setNotice(`已批量导入 ${imported.length} 条职位（POST /api/job-descriptions/import）`);
     } catch (reason) {
@@ -669,6 +818,7 @@ export default function Home() {
   async function saveSampleAndAnalyze() {
     setBusy("sample");
     setError("");
+    let run: AnalysisRun | null = null;
     try {
       setEditingResumeId(null);
       setEditingJobId(null);
@@ -686,19 +836,24 @@ export default function Home() {
       setResumes((items) => [createdResume, ...items.filter((item) => item.id !== createdResume.id)]);
       setJobs((items) => [createdJob, ...items.filter((item) => item.id !== createdJob.id)]);
       setJobsTotal((total) => total + 1);
-      setSelectedResumeId(createdResume.id);
-      setSelectedJobId(createdJob.id);
+      chooseResume(createdResume.id);
+      chooseJob(createdJob.id);
       setNotice("示例数据已保存，正在启动 RAG 匹配分析…");
       setBusy("analysis");
+      run = beginAnalysisRun(createdResume.id, createdJob.id);
       const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
         method: "POST",
         body: JSON.stringify({ resumeId: createdResume.id, jobDescriptionId: createdJob.id }),
       });
-      await waitForAnalysis(result);
+      const completed = await waitForAnalysis(result, run);
+      if (!completed) return;
       setNotice("示例匹配完成，下方报告已更新");
       requestAnimationFrame(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "示例流程失败");
+      if (!run || isCurrentAnalysisRun(run)) {
+        activeAnalysisRun.current = null;
+        setError(reason instanceof Error ? reason.message : "示例流程失败");
+      }
     } finally {
       setBusy("");
     }
@@ -712,16 +867,90 @@ export default function Home() {
     setBusy("analysis");
     setError("");
     setNotice(`正在检索（语义阈值门控 + 关键词重排），${generationProgressLabel(aiStatus)}`);
+    const resumeId = Number(selectedResumeId);
+    const jobId = Number(selectedJobId);
+    const run = beginAnalysisRun(resumeId, jobId);
     try {
       const result = await apiRequest<Analysis>("/api/analysis-histories/ai", {
         method: "POST",
-        body: JSON.stringify({ resumeId: selectedResumeId, jobDescriptionId: selectedJobId }),
+        body: JSON.stringify({ resumeId, jobDescriptionId: jobId }),
       });
-      await waitForAnalysis(result);
+      const completed = await waitForAnalysis(result, run);
+      if (!completed) return;
       setNotice("分析完成，结果已写入 MySQL");
       requestAnimationFrame(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "AI 分析失败");
+      if (isCurrentAnalysisRun(run)) {
+        activeAnalysisRun.current = null;
+        setError(reason instanceof Error ? reason.message : "AI 分析失败");
+      }
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runTopMatchesAnalysis() {
+    if (!selectedResumeId) {
+      setError("请先选择一份简历，再分析向量粗排 Top N");
+      return;
+    }
+    const resumeId = Number(selectedResumeId);
+    setBusy("top-analysis");
+    setError("");
+    let currentRun: AnalysisRun | null = null;
+    try {
+      setJobSort("semantic");
+      const matches = jobSemanticDataReady
+        ? jobSemanticMatches
+        : await loadSemanticMatches(resumeId);
+      if (!matches) return;
+      if (matches.length === 0) {
+        setNotice("岗位库还是空的，先保存 JD 才能做向量粗排");
+        return;
+      }
+
+      const latestItems = jobAnalysisDataReady
+        ? jobLatestAnalyses
+        : await apiRequest<AnalysisSummary[]>(`/api/analysis-histories/latest-by-resume?resumeId=${resumeId}`);
+      setJobLatestAnalyses((current) => mergeLatestAnalysisSummaries(latestItems, current));
+      setJobAnalysesResumeId(resumeId);
+      setJobAnalysesStatus("ready");
+      const candidates = matches.slice(0, topMatchCount);
+      const targets = semanticAnalysisTargets(matches, latestItems, topMatchCount);
+      const skipped = candidates.length - targets.length;
+      if (targets.length === 0) {
+        setNotice(`向量 Top ${candidates.length} 都已有当前版本的完整分析，不重复调用 LLM`);
+        return;
+      }
+
+      let completedCount = 0;
+      for (const [index, match] of targets.entries()) {
+        chooseJob(match.job.id);
+        currentRun = beginAnalysisRun(resumeId, match.job.id);
+        setNotice(
+          `Top N 精析 ${index + 1}/${targets.length}：${match.job.title}（粗排相似度 ${match.similarity.toFixed(3)}）`,
+        );
+        const submitted = await apiRequest<Analysis>("/api/analysis-histories/ai", {
+          method: "POST",
+          body: JSON.stringify({ resumeId, jobDescriptionId: match.job.id }),
+        });
+        const completed = await waitForAnalysis(submitted, currentRun);
+        if (!completed) return;
+        if (completed.status === "PENDING") {
+          setNotice(`已完成 ${completedCount} 个；当前分析仍在后台运行，Top N 队列先暂停`);
+          return;
+        }
+        completedCount += 1;
+      }
+
+      await loadJobAnalyses(resumeId);
+      setNotice(`Top N 精析完成：新增 ${completedCount} 个，复用 ${skipped} 个已有结果`);
+      requestAnimationFrame(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }));
+    } catch (reason) {
+      if (!currentRun || isCurrentAnalysisRun(currentRun)) {
+        activeAnalysisRun.current = null;
+        setError(reason instanceof Error ? reason.message : "Top N 分析失败");
+      }
     } finally {
       setBusy("");
     }
@@ -788,22 +1017,46 @@ export default function Home() {
   const previewStrengths = previewKept.filter((item) => PREVIEW_STRENGTHS[item.index]);
   const effectiveHistoryTotal = Math.max(historyTotal, history.length);
   const effectiveJobsTotal = Math.max(jobsTotal, jobs.length);
-  const jobAnalysesLoading = Boolean(selectedResumeId && jobAnalysesResumeId !== selectedResumeId);
-  const latestAnalysisByJob = useMemo(
-    () => new Map(
-      jobLatestAnalyses
-        .filter((item) => item.resumeId === selectedResumeId)
-        .map((item) => [item.jobDescriptionId, item]),
-    ),
-    [jobLatestAnalyses, selectedResumeId],
+  const jobAnalysesLoading = jobAnalysesStatus === "loading";
+  const jobAnalysisDataReady = Boolean(
+    selectedResumeId
+    && jobAnalysesStatus === "ready"
+    && jobAnalysesResumeId === selectedResumeId,
   );
-  const visibleJobs = useMemo(() => {
+  const jobSemanticDataReady = Boolean(
+    selectedResumeId
+    && jobSemanticStatus === "ready"
+    && jobSemanticResumeId === selectedResumeId,
+  );
+  const jobAnalysisDataRequired = jobSort === "score" || jobSort === "analyzed" || jobFilter === "unanalyzed";
+  const jobSemanticDataRequired = jobSort === "semantic";
+  const latestAnalysisByJob = new Map<number, AnalysisSummary>(jobAnalysisDataReady
+    ? jobLatestAnalyses
+        .filter((item) => item.resumeId === selectedResumeId)
+        .map((item) => [item.jobDescriptionId, item])
+    : []);
+  const semanticSimilarityByJob = new Map<number, number>(jobSemanticDataReady
+    ? jobSemanticMatches.map((item) => [item.job.id, item.similarity])
+    : []);
+  const visibleJobs = (() => {
+    if (jobAnalysisDataRequired && !jobAnalysisDataReady) return [];
+    if (jobSemanticDataRequired && !jobSemanticDataReady) return [];
     const filtered = jobFilter === "unanalyzed"
-      ? jobs.filter((item) => !latestAnalysisByJob.has(item.id))
+      ? jobs.filter((item) => {
+          const latest = latestAnalysisByJob.get(item.id);
+          return !latest || latest.status === "FAILED";
+        })
       : [...jobs];
-    if (jobSort === "score") {
+    if (jobSort === "recent") {
+      filtered.sort((left, right) => jobTimestamp(right) - jobTimestamp(left) || right.id - left.id);
+    } else if (jobSort === "score") {
       filtered.sort((left, right) =>
         analysisScore(latestAnalysisByJob.get(right.id)) - analysisScore(latestAnalysisByJob.get(left.id))
+        || right.id - left.id,
+      );
+    } else if (jobSort === "semantic") {
+      filtered.sort((left, right) =>
+        (semanticSimilarityByJob.get(right.id) ?? -1) - (semanticSimilarityByJob.get(left.id) ?? -1)
         || right.id - left.id,
       );
     } else if (jobSort === "analyzed") {
@@ -813,7 +1066,7 @@ export default function Home() {
       );
     }
     return filtered;
-  }, [jobFilter, jobSort, jobs, latestAnalysisByJob]);
+  })();
   const visibleHistory = historyExpanded ? history : history.slice(0, HISTORY_PREVIEW_LIMIT);
   const hiddenLoadedHistory = Math.max(0, history.length - HISTORY_PREVIEW_LIMIT);
   const hasMoreHistory = history.length < effectiveHistoryTotal;
@@ -889,7 +1142,7 @@ export default function Home() {
             <button className="ghost accent" type="button" disabled={!!busy} onClick={() => void saveSampleAndAnalyze()}>
               {busy === "sample" || busy === "analysis" ? "示例匹配中…" : "一键示例匹配"}
             </button>
-            <button className="ghost" type="button" onClick={() => void loadWorkspace()}>刷新数据</button>
+            <button className="ghost" type="button" disabled={!!busy} onClick={() => void loadWorkspace()}>刷新数据</button>
           </div>
         </header>
 
@@ -926,7 +1179,7 @@ export default function Home() {
               <div className="field-row"><label>手机<input value={resumeForm.phone} onChange={(e) => setResumeForm({ ...resumeForm, phone: e.target.value })} placeholder="可选" /></label><label>邮箱<input type="email" value={resumeForm.email} onChange={(e) => setResumeForm({ ...resumeForm, email: e.target.value })} placeholder="可选" /></label></div>
               <label>简历文本<textarea required={!file || !!editingResumeId} rows={8} value={resumeForm.rawText} onChange={(e) => setResumeForm({ ...resumeForm, rawText: e.target.value })} disabled={!!file && !editingResumeId} placeholder={file ? "已选择文件，将由服务端解析正文；保存后可在详情中编辑" : "可直接粘贴简历正文；上传文件时由服务端解析"} /></label>
               <div className="form-actions">
-                <button className="secondary" disabled={busy === "resume"}>{busy === "resume" ? "保存中…" : editingResumeId ? "更新简历" : "保存简历"}</button>
+                <button className="secondary" disabled={!!busy}>{busy === "resume" ? "保存中…" : editingResumeId ? "更新简历" : "保存简历"}</button>
                 {editingResumeId && (
                   <button className="ghost" type="button" onClick={resetResumeEditor}>取消编辑</button>
                 )}
@@ -937,7 +1190,7 @@ export default function Home() {
                   <p className="entity-empty">暂无简历，保存后会出现在这里</p>
                 ) : resumes.map((item) => (
                   <div className={`entity-row ${selectedResumeId === item.id ? "selected" : ""} ${editingResumeId === item.id ? "editing" : ""}`} key={item.id}>
-                    <button type="button" className="entity-main" onClick={() => setSelectedResumeId(item.id)} title="选为匹配简历">
+                    <button type="button" className="entity-main" onClick={() => chooseResume(item.id)} title="选为匹配简历">
                       <strong>#{item.id} · {item.title}</strong>
                       <small>{item.candidateName}{item.originalFileName ? ` · ${item.originalFileName}` : ""}</small>
                     </button>
@@ -964,7 +1217,7 @@ export default function Home() {
               <label>岗位描述<textarea required rows={4} value={jobForm.description} onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })} placeholder="岗位职责、业务方向…" /></label>
               <label>任职要求<textarea rows={4} value={jobForm.requirements} onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })} placeholder="技术栈、经验要求…" /></label>
               <div className="form-actions">
-                <button className="secondary" disabled={busy === "job"}>{busy === "job" ? "保存中…" : editingJobId ? "更新职位" : "保存职位"}</button>
+                <button className="secondary" disabled={!!busy}>{busy === "job" ? "保存中…" : editingJobId ? "更新职位" : "保存职位"}</button>
                 {editingJobId && (
                   <button className="ghost" type="button" onClick={resetJobEditor}>取消编辑</button>
                 )}
@@ -985,7 +1238,7 @@ export default function Home() {
                     placeholder='[{"title":"...","companyName":"...","description":"..."}]'
                   />
                   <div className="form-actions">
-                    <button className="secondary" type="button" disabled={busy === "bulk-import"} onClick={() => void bulkImportJobs()}>
+                    <button className="secondary" type="button" disabled={!!busy} onClick={() => void bulkImportJobs()}>
                       {busy === "bulk-import" ? "导入中…" : "确认导入"}
                     </button>
                     <button className="ghost" type="button" onClick={() => setBulkImportText(JSON.stringify(SAMPLE_BULK_JOBS, null, 2))}>
@@ -1000,14 +1253,15 @@ export default function Home() {
                   <select aria-label="职位排序" value={jobSort} onChange={(event) => {
                     const next = event.target.value as JobSort;
                     setJobSort(next);
-                    if (next !== "recent") void loadAllJobsForRanking();
-                  }}>
+                    if (next === "score" || next === "analyzed") void loadAllJobsForRanking();
+                  }} disabled={jobsLoadingMore}>
                     <option value="recent">最近保存</option>
-                    <option value="score">匹配分最高</option>
+                    <option value="semantic">向量粗排</option>
+                    <option value="score">已分析匹配分</option>
                     <option value="analyzed">最近分析</option>
                   </select>
                   <label>
-                    <input type="checkbox" checked={jobFilter === "unanalyzed"} onChange={(event) => {
+                    <input type="checkbox" checked={jobFilter === "unanalyzed"} disabled={jobsLoadingMore} onChange={(event) => {
                       const next = event.target.checked ? "unanalyzed" : "all";
                       setJobFilter(next);
                       if (next === "unanalyzed") void loadAllJobsForRanking();
@@ -1015,21 +1269,61 @@ export default function Home() {
                     仅看未分析
                   </label>
                 </div>
-                {(jobAnalysesLoading || jobsLoadingMore) && <p className="entity-empty">正在整理完整岗位库…</p>}
+                <div className="semantic-actions">
+                  <select aria-label="Top N 分析数量" value={topMatchCount} onChange={(event) => setTopMatchCount(Number(event.target.value))}>
+                    <option value={3}>Top 3</option>
+                    <option value={5}>Top 5</option>
+                    <option value={10}>Top 10</option>
+                  </select>
+                  <button className="ghost compact" type="button" disabled={!!busy || !selectedResumeId} onClick={() => void runTopMatchesAnalysis()}>
+                    {busy === "top-analysis" ? "逐个精析中…" : "分析向量 Top N"}
+                  </button>
+                </div>
+                <small className="semantic-note">向量相似度只负责廉价召回候选，不是最终匹配分。</small>
+                {(jobAnalysesLoading || jobsLoadingMore || jobSemanticStatus === "loading") && <p className="entity-empty">正在整理完整岗位库…</p>}
+                {(jobAnalysisDataRequired || jobSemanticDataRequired) && !selectedResumeId && (
+                  <p className="entity-empty">请先选择一份简历，再做粗排或按分析结果整理岗位</p>
+                )}
+                {jobAnalysisDataRequired && jobAnalysesStatus === "error" && (
+                  <div className="entity-empty">
+                    匹配信息加载失败：{jobAnalysesError || "请稍后重试"}
+                    {selectedResumeId && (
+                      <button className="ghost compact" type="button" onClick={() => void loadJobAnalyses(Number(selectedResumeId))}>
+                        重试
+                      </button>
+                    )}
+                  </div>
+                )}
+                {jobSemanticDataRequired && jobSemanticStatus === "error" && (
+                  <div className="entity-empty">
+                    向量粗排失败：{jobSemanticError || "请稍后重试"}
+                    {selectedResumeId && (
+                      <button className="ghost compact" type="button" onClick={() => void loadSemanticMatches(Number(selectedResumeId))}>
+                        重试
+                      </button>
+                    )}
+                  </div>
+                )}
                 {jobs.length === 0 ? (
                   <p className="entity-empty">暂无职位，保存后会出现在这里</p>
-                ) : visibleJobs.length === 0 ? (
+                ) : (jobAnalysisDataRequired && !jobAnalysisDataReady)
+                    || (jobSemanticDataRequired && !jobSemanticDataReady) ? null : visibleJobs.length === 0 ? (
                   <p className="entity-empty">当前简历下没有未分析职位</p>
                 ) : visibleJobs.map((item) => {
                   const latest = latestAnalysisByJob.get(item.id);
+                  const semanticSimilarity = semanticSimilarityByJob.get(item.id);
                   return (
                     <div className={`entity-row ${selectedJobId === item.id ? "selected" : ""} ${editingJobId === item.id ? "editing" : ""}`} key={item.id}>
-                      <button type="button" className="entity-main job-entity-main" onClick={() => setSelectedJobId(item.id)} title="选为匹配职位">
+                      <button type="button" className="entity-main job-entity-main" onClick={() => chooseJob(item.id)} title="选为匹配职位">
                         <span className="job-entity-copy">
                           <strong>#{item.id} · {item.title}</strong>
                           <small>{item.companyName}{item.location ? ` · ${item.location}` : ""}</small>
                         </span>
-                        <em className={`job-score ${latest?.status.toLowerCase() || "unanalyzed"}`}>{jobScoreLabel(latest)}</em>
+                        <em className={`job-score ${jobSort === "semantic" ? "semantic" : latest?.status.toLowerCase() || "unanalyzed"}`}>
+                          {jobSort === "semantic" && typeof semanticSimilarity === "number"
+                            ? `相似 ${semanticSimilarity.toFixed(2)}`
+                            : jobScoreLabel(latest)}
+                        </em>
                       </button>
                       <div className="entity-actions">
                         <Link className="ghost compact" href={`/jobs/${item.id}`}>详情</Link>
@@ -1051,8 +1345,8 @@ export default function Home() {
 
             <div className="step-card analyze-card">
               <div className="step-title"><span>03</span><div><h3>启动 AI 匹配</h3><p>选择数据并生成解释报告</p></div></div>
-              <label>选择简历<select value={selectedResumeId} onChange={(e) => setSelectedResumeId(Number(e.target.value))}><option value="">请选择（先保存简历）</option>{resumes.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.candidateName}</option>)}</select></label>
-              <label>选择职位<select value={selectedJobId} onChange={(e) => setSelectedJobId(Number(e.target.value))}><option value="">请选择（先保存职位）</option>{jobs.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.companyName}</option>)}</select></label>
+              <label>选择简历<select value={selectedResumeId} onChange={(e) => chooseResume(e.target.value ? Number(e.target.value) : "")}><option value="">请选择（先保存简历）</option>{resumes.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.candidateName}</option>)}</select></label>
+              <label>选择职位<select value={selectedJobId} onChange={(e) => chooseJob(e.target.value ? Number(e.target.value) : "")}><option value="">请选择（先保存职位）</option>{jobs.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.companyName}</option>)}</select></label>
               <div className="rag-hint">
                 <span className="badge-new">V2</span>
                 <div>
@@ -1067,7 +1361,7 @@ export default function Home() {
                 <b>→</b><div><i>4</i><span>生成分析<small>{runtimeModeLabel(aiStatus)}</small></span></div>
               </div>
               <div className="analyze-actions">
-                <button className="primary analyze" type="button" onClick={runAnalysis} disabled={busy === "analysis" || !selectedResumeId || !selectedJobId}>
+                <button className="primary analyze" type="button" onClick={runAnalysis} disabled={!!busy || !selectedResumeId || !selectedJobId}>
                   {busy === "analysis" ? <><i className="spinner" /> AI 正在分析…</> : <>开始智能匹配 <span>↗</span></>}
                 </button>
                 <button className="secondary outline" type="button" disabled={!!busy} onClick={() => void saveSampleAndAnalyze()}>
@@ -1259,7 +1553,7 @@ export default function Home() {
                 暂无记录。用「一键示例匹配」生成第一条，之后每次分析都会出现在这里。
               </div>
             ) : visibleHistory.map((item) => (
-              <button className="history-row" key={item.id} type="button" onClick={() => { setAnalysis(item); document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }); }}>
+              <button className="history-row" key={item.id} type="button" onClick={() => { activeAnalysisRun.current = null; setAnalysis(item); document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }); }}>
                 <span>#{item.id} · {item.resumeTitle}</span>
                 <span>{item.jobTitle}</span>
                 <span><i className={item.status.toLowerCase()} />{item.status}</span>

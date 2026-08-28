@@ -22,6 +22,11 @@ public class AnalysisHistoryUpdateService {
         if (history == null || history.getStatus() != AnalysisStatus.PENDING) {
             return false;
         }
+        if (!ContentFingerprints.inputsMatch(history)) {
+            history.setStatus(AnalysisStatus.FAILED);
+            history.setSummary("分析期间简历或岗位内容已更新，请基于最新内容重新分析");
+            return false;
+        }
         mutator.accept(history);
         history.setStatus(AnalysisStatus.COMPLETED);
         return true;
