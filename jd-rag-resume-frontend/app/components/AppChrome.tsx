@@ -86,7 +86,7 @@ export function AppChrome({ children, title, eyebrow = "RESUME LENS", actions }:
         <div className="model-card">
           <span>当前模型组合</span>
           <strong>Alibaba GTE</strong>
-          <small>CLS pooling · Hybrid RAG</small>
+          <small>CLS pooling · 重排 + 阈值门控</small>
           <BackendStatus variant="model" />
         </div>
         <div className="user-card">

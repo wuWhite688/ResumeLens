@@ -1,6 +1,6 @@
 # ResumeLens 岗位助手（Chrome MV3）
 
-第一版支持在 BOSS 直聘职位页抓取 JD、手动校正、选择 ResumeLens 简历、启动 Hybrid RAG 分析，并在扩展里显示结果。岗位会写入 ResumeLens 的个人岗位库；相同 BOSS 岗位再次出现时按来源 ID 查重，并优先复用同一份简历的已有分析。
+第一版支持在 BOSS 直聘职位页抓取 JD、手动校正、选择 ResumeLens 简历、启动 RAG 匹配分析，并在扩展里显示结果。岗位会写入 ResumeLens 的个人岗位库；相同 BOSS 岗位再次出现时按来源 ID 查重，并优先复用同一份简历的已有分析。
 
 ## 本地安装
 

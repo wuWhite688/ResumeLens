@@ -138,7 +138,7 @@ export function buildReportMarkdown(analysis: ReportAnalysis): string {
     `| 已过滤 | ${meta?.filtered ?? Math.max(0, evidence.length - kept.length)} |`,
     `| 平均相似度 | ${(meta?.avgSimilarity ?? 0).toFixed(4)} |`,
     `| 阈值 / Top-K | ${(meta?.minSimilarity ?? 0.55).toFixed(2)} / ${meta?.topK ?? 5} |`,
-    `| 检索 | ${meta?.hybrid === false ? "语义" : "Hybrid"}${meta?.dualQuery ? " · 双 Query" : ""} |`,
+    `| 检索 | ${meta?.hybrid === false ? "语义" : "关键词重排"}${meta?.dualQuery ? " · 双 Query" : ""} |`,
     "",
     "## 摘要",
     "",

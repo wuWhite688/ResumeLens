@@ -1,6 +1,6 @@
 # jd-rag-resume-frontend · ResumeLens
 
-简历 / JD 智能匹配前端工作台：登录、简历与职位 CRUD、Hybrid RAG 分析报告、Markdown / PDF 导出。
+简历 / JD 智能匹配前端工作台：登录、简历与职位 CRUD、RAG 分析报告（关键词重排 + 语义阈值门控）、Markdown / PDF 导出。
 
 完整项目说明见上级目录：
 
