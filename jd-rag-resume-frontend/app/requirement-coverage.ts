@@ -21,7 +21,19 @@ type Terms = {
   cjk: string[];
 };
 
-const LATIN_WEIGHT = 2;
+/**
+ * 拉丁技术词（Kafka、MyBatis、Docker）区分度远高于中文 2-gram 碎片，
+ * 命中一个就足以支撑一条要求；中文侧要凑够三个碎片才算数。
+ *
+ * 参数拿 dataset 的 18 组配对实测（覆盖数 / 该类要求总数）：
+ *   w=3 t=3   对口 44/45   同领域难负 12/44   跨领域 1/46
+ *   w=2 t=3   判定与上一行完全一致
+ *   w=2 t=2   对口 45/45，但难负涨到 19/44、跨领域涨到 4/46，不划算
+ *
+ * 拉丁权重取 3 而不是 2，收益不在上面的汇总数字里，而在「熟悉 Kafka。」这类
+ * 单专名短要求：中文侧全是停用词，w=2 时它们得 0 分被误判未覆盖，w=3 才判对。
+ */
+const LATIN_WEIGHT = 3;
 const CJK_WEIGHT = 1;
 const COVER_THRESHOLD = 3;
 

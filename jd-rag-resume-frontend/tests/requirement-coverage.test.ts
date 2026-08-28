@@ -124,6 +124,18 @@ test("requirements are only matched against chunks that entered the prompt", () 
   assert.deepEqual(coverageSummary(rows), { covered: 0, total: 5 });
 });
 
+/**
+ * 锁住 LATIN_WEIGHT >= COVER_THRESHOLD。「熟悉 Kafka。」的中文侧全是停用词，
+ * 全部分数都压在那一个专名上；把拉丁权重调回 2，这条就会被误判成未覆盖。
+ */
+test("a short requirement naming a single technology resolves on that name alone", () => {
+  const rows = coverRequirements("1. 熟悉 Kafka。\n2. 熟悉 Elasticsearch。", RESUME_CHUNKS);
+
+  assert.equal(rows[0].covered, true, "简历里写了 Kafka，这条该判覆盖");
+  assert.deepEqual(rows[0].chunks, [0]);
+  assert.equal(rows[1].covered, false, "简历里没有 Elasticsearch，不能凭空判覆盖");
+});
+
 test("a requirement made only of filler words stays uncovered", () => {
   const rows = coverRequirements("1. 具备良好的学习能力，能够熟悉相关工作。", RESUME_CHUNKS);
   assert.equal(rows[0].covered, false);
