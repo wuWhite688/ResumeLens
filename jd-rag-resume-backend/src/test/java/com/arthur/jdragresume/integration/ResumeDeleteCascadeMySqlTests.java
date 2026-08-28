@@ -101,8 +101,10 @@ class ResumeDeleteCascadeMySqlTests {
                             resumeRepository,
                             resumeChunkRepository,
                             currentUserService,
-                            proxy(AppUserRepository.class, (ignored, method, args) -> {
-                                throw new UnsupportedOperationException(
+                            proxy(AppUserRepository.class, (ignored, method, args) -> switch (method.getName()) {
+                                case "findByIdForUpdate" -> Optional.of(rows.user());
+                                case "toString" -> "AppUserRepositoryMySqlTestDouble";
+                                default -> throw new UnsupportedOperationException(
                                         "Unexpected repository call: " + method.getName()
                                 );
                             }),
@@ -166,8 +168,12 @@ class ResumeDeleteCascadeMySqlTests {
                 JobDescriptionService service = new JobDescriptionService(
                         repository,
                         new FixedCurrentUserService(rows.user()),
-                        proxy(AppUserRepository.class, (ignored, method, args) -> {
-                            throw new UnsupportedOperationException("Unexpected repository call: " + method.getName());
+                        proxy(AppUserRepository.class, (ignored, method, args) -> switch (method.getName()) {
+                            case "findByIdForUpdate" -> Optional.of(rows.user());
+                            case "toString" -> "AppUserRepositoryMySqlTestDouble";
+                            default -> throw new UnsupportedOperationException(
+                                    "Unexpected repository call: " + method.getName()
+                            );
                         }),
                         com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service(),
                         200
