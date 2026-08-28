@@ -3,11 +3,13 @@ package com.arthur.jdragresume.service;
 import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryRequest;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryResponse;
+import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.entity.AnalysisHistory;
 import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
+import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -55,24 +57,29 @@ public class AnalysisHistoryService {
     @Transactional(readOnly = true)
     public Optional<AnalysisHistoryResponse> findLatest(Long resumeId, Long jobDescriptionId) {
         AppUser user = currentUserService.getCurrentUser();
+        Resume resume = resumeService.getEntityForCurrentUser(resumeId);
+        JobDescription jobDescription = jobDescriptionService.getEntityForCurrentUser(jobDescriptionId);
         return analysisHistoryRepository
-                .findFirstByUser_IdAndResume_IdAndJobDescription_IdOrderByCreatedAtDesc(
+                .findFirstByUser_IdAndResume_IdAndJobDescription_IdAndResumeFingerprintAndJobFingerprintOrderByIdDesc(
                         user.getId(),
                         resumeId,
-                        jobDescriptionId
+                        jobDescriptionId,
+                        ContentFingerprints.resume(resume),
+                        ContentFingerprints.job(jobDescription)
                 )
                 .map(AnalysisHistoryResponse::from);
     }
 
     @Transactional(readOnly = true)
-    public List<AnalysisHistoryResponse> findLatestForEachJob(Long resumeId) {
+    public List<AnalysisHistorySummaryResponse> findLatestForEachJob(Long resumeId) {
         AppUser user = currentUserService.getCurrentUser();
-        resumeService.getEntityForCurrentUser(resumeId);
+        Resume resume = resumeService.getEntityForCurrentUser(resumeId);
         return analysisHistoryRepository
-                .findLatestForEachJobByUserIdAndResumeId(user.getId(), resumeId)
-                .stream()
-                .map(AnalysisHistoryResponse::from)
-                .toList();
+                .findLatestCurrentForEachJobByUserIdAndResumeId(
+                        user.getId(),
+                        resumeId,
+                        ContentFingerprints.resume(resume)
+                );
     }
 
     @Transactional
@@ -86,7 +93,14 @@ public class AnalysisHistoryService {
     @Transactional
     public AnalysisHistoryResponse update(Long id, AnalysisHistoryRequest request) {
         AnalysisHistory history = getEntityForCurrentUser(id);
-        applyRequest(history, request);
+        if (!history.getResume().getId().equals(request.resumeId())
+                || !history.getJobDescription().getId().equals(request.jobDescriptionId())) {
+            throw new BusinessException(
+                    "ANALYSIS_INPUT_IMMUTABLE",
+                    "analysis resume and job cannot be changed after submission"
+            );
+        }
+        history.setSummary(request.summary());
         return AnalysisHistoryResponse.from(analysisHistoryRepository.save(history));
     }
 
@@ -111,6 +125,10 @@ public class AnalysisHistoryService {
         history.setUser(user);
         history.setResume(resume);
         history.setJobDescription(jobDescription);
+        history.setResumeFingerprint(ContentFingerprints.resume(resume));
+        String jobFingerprint = ContentFingerprints.job(jobDescription);
+        jobDescription.setContentFingerprint(jobFingerprint);
+        history.setJobFingerprint(jobFingerprint);
         history.setSummary(request.summary());
     }
 

@@ -5,9 +5,13 @@ import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.job.JobDescriptionBulkImportRequest;
 import com.arthur.jdragresume.dto.job.JobDescriptionRequest;
 import com.arthur.jdragresume.dto.job.JobDescriptionResponse;
+import com.arthur.jdragresume.dto.job.JobSemanticMatchResponse;
 import com.arthur.jdragresume.dto.job.JobSourceLookupResponse;
 import com.arthur.jdragresume.service.JobDescriptionService;
+import com.arthur.jdragresume.service.JobSemanticMatchService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
@@ -30,9 +34,14 @@ import java.util.List;
 @Validated
 public class JobDescriptionController {
     private final JobDescriptionService jobDescriptionService;
+    private final JobSemanticMatchService jobSemanticMatchService;
 
-    public JobDescriptionController(JobDescriptionService jobDescriptionService) {
+    public JobDescriptionController(
+            JobDescriptionService jobDescriptionService,
+            JobSemanticMatchService jobSemanticMatchService
+    ) {
         this.jobDescriptionService = jobDescriptionService;
+        this.jobSemanticMatchService = jobSemanticMatchService;
     }
 
     @GetMapping
@@ -47,6 +56,14 @@ public class JobDescriptionController {
     @GetMapping("/{id}")
     public ApiResponse<JobDescriptionResponse> findById(@PathVariable Long id) {
         return ApiResponse.ok(jobDescriptionService.findById(id));
+    }
+
+    @GetMapping("/matches")
+    public ApiResponse<List<JobSemanticMatchResponse>> findSemanticMatches(
+            @RequestParam Long resumeId,
+            @RequestParam(defaultValue = "200") @Min(1) @Max(200) int limit
+    ) {
+        return ApiResponse.ok(jobSemanticMatchService.rank(resumeId, limit));
     }
 
     @GetMapping("/source")

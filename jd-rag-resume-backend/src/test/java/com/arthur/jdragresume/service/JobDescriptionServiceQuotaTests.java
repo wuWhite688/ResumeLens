@@ -63,6 +63,7 @@ class JobDescriptionServiceQuotaTests {
                 jobDescriptionRepository,
                 currentUser(user),
                 appUserRepository,
+                SemanticEmbeddingTestSupport.service(),
                 MAX_PER_USER
         );
     }

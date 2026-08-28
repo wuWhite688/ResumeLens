@@ -35,7 +35,10 @@ export async function dispatchExtensionBridgeRequest(
         requestApi<PageData<unknown>>("/api/resumes?size=50"),
         requestApi<JobSourceLookup<unknown>>(`/api/job-descriptions/source?${query}`),
       ]);
-      return { resumes: resumePage.content, existingJob: lookup.found ? lookup.job : null };
+      return {
+        resumes: resumePage.content.map(resumeForExtension),
+        existingJob: lookup.found && lookup.job ? jobForExtension(lookup.job) : null,
+      };
     }
     case "latestAnalysis": {
       const payload = latestAnalysisPayload(request.payload);
@@ -43,19 +46,64 @@ export async function dispatchExtensionBridgeRequest(
         resumeId: String(payload.resumeId),
         jobDescriptionId: String(payload.jobDescriptionId),
       });
-      return requestApi<unknown>(`/api/analysis-histories/latest?${query}`);
+      const analysis = await requestApi<unknown>(`/api/analysis-histories/latest?${query}`);
+      return analysis == null ? null : analysisForExtension(analysis);
     }
-    case "analyze":
-      return requestApi<unknown>("/api/browser-extension/analyze", {
+    case "analyze": {
+      const response = await requestApi<unknown>("/api/browser-extension/analyze", {
         method: "POST",
         body: JSON.stringify(objectPayload(request.payload, "分析参数不能为空")),
       });
+      return analyzeResponseForExtension(response);
+    }
     case "getAnalysis": {
       const payload = objectPayload(request.payload, "分析记录参数不能为空");
       const id = positiveId(payload.id, "analysis id");
-      return requestApi<unknown>(`/api/analysis-histories/${id}`);
+      return analysisForExtension(await requestApi<unknown>(`/api/analysis-histories/${id}`));
     }
   }
+}
+
+function resumeForExtension(value: unknown) {
+  const resume = objectPayload(value, "简历响应格式不正确");
+  return pick(resume, ["id", "title", "candidateName"]);
+}
+
+function jobForExtension(value: unknown) {
+  const job = objectPayload(value, "岗位响应格式不正确");
+  return pick(job, ["id", "title"]);
+}
+
+function analysisForExtension(value: unknown) {
+  const analysis = objectPayload(value, "分析响应格式不正确");
+  return pick(analysis, [
+    "id",
+    "resumeId",
+    "jobDescriptionId",
+    "matchScore",
+    "status",
+    "summary",
+    "strengths",
+    "missingSkills",
+    "improvementSuggestions",
+    "interviewQuestions",
+    "createdAt",
+  ]);
+}
+
+function analyzeResponseForExtension(value: unknown) {
+  const response = objectPayload(value, "扩展分析响应格式不正确");
+  return {
+    job: jobForExtension(response.job),
+    analysis: analysisForExtension(response.analysis),
+    existingJob: response.existingJob === true,
+    contentChanged: response.contentChanged === true,
+    reusedAnalysis: response.reusedAnalysis === true,
+  };
+}
+
+function pick(value: Record<string, unknown>, keys: string[]) {
+  return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
 export function isExtensionBridgeRequest(value: unknown): value is ExtensionBridgeRequest {

@@ -1,11 +1,13 @@
 package com.arthur.jdragresume.service;
 
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryRequest;
+import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.entity.AnalysisHistory;
 import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
+import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
@@ -19,11 +21,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AnalysisHistoryServiceSecurityTests {
     private RepositoryState repositoryState;
@@ -43,7 +47,14 @@ class AnalysisHistoryServiceSecurityTests {
                         yield repositoryState.saved;
                     }
                     case "findByIdAndUserId" -> repositoryState.found;
-                    case "findLatestForEachJobByUserIdAndResumeId" -> repositoryState.latest;
+                    case "findFirstByUser_IdAndResume_IdAndJobDescription_IdAndResumeFingerprintAndJobFingerprintOrderByIdDesc" -> {
+                        repositoryState.latestOneArguments = args.clone();
+                        yield repositoryState.latestOne;
+                    }
+                    case "findLatestCurrentForEachJobByUserIdAndResumeId" -> {
+                        repositoryState.latestArguments = args.clone();
+                        yield repositoryState.latest;
+                    }
                     case "toString" -> "AnalysisHistoryRepositoryTestDouble";
                     default -> throw new UnsupportedOperationException(
                             "Unexpected repository call: " + method.getName()
@@ -56,9 +67,11 @@ class AnalysisHistoryServiceSecurityTests {
         ReflectionTestUtils.setField(user, "id", 1L);
         resume = new Resume();
         resume.setTitle("Backend resume");
+        resume.setRawText("Java Spring Boot");
         ReflectionTestUtils.setField(resume, "id", 2L);
         jobDescription = new JobDescription();
         jobDescription.setTitle("Java backend engineer");
+        jobDescription.setDescription("Build backend services");
         ReflectionTestUtils.setField(jobDescription, "id", 3L);
 
         CurrentUserService currentUserService = new FixedCurrentUserService(user);
@@ -110,18 +123,41 @@ class AnalysisHistoryServiceSecurityTests {
         assertEquals(new BigDecimal("87.50"), history.getMatchScore());
         assertEquals(AnalysisStatus.COMPLETED, history.getStatus());
         assertEquals("edited summary", history.getSummary());
+        assertNull(history.getResumeFingerprint());
+        assertNull(history.getJobFingerprint());
     }
 
     @Test
-    void latestForEachJobUsesCurrentUserAndSelectedResume() {
+    void manualUpdateCannotMoveACompletedResultToDifferentInputs() {
         AnalysisHistory history = new AnalysisHistory();
-        ReflectionTestUtils.setField(history, "id", 11L);
         history.setUser(user);
         history.setResume(resume);
         history.setJobDescription(jobDescription);
         history.setStatus(AnalysisStatus.COMPLETED);
-        history.setMatchScore(new BigDecimal("88.00"));
-        repositoryState.latest = List.of(history);
+        repositoryState.found = Optional.of(history);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> analysisHistoryService.update(
+                        7L,
+                        new AnalysisHistoryRequest(2L, 99L, "moved summary")
+                )
+        );
+
+        assertEquals("ANALYSIS_INPUT_IMMUTABLE", exception.getCode());
+        assertNull(history.getSummary());
+    }
+
+    @Test
+    void latestForEachJobUsesCurrentUserAndSelectedResume() {
+        repositoryState.latest = List.of(new AnalysisHistorySummaryResponse(
+                11L,
+                2L,
+                3L,
+                new BigDecimal("88.00"),
+                AnalysisStatus.COMPLETED,
+                LocalDateTime.now()
+        ));
 
         var result = analysisHistoryService.findLatestForEachJob(2L);
 
@@ -129,6 +165,29 @@ class AnalysisHistoryServiceSecurityTests {
         assertEquals(11L, result.getFirst().id());
         assertEquals(3L, result.getFirst().jobDescriptionId());
         assertEquals(new BigDecimal("88.00"), result.getFirst().matchScore());
+        assertEquals(1L, repositoryState.latestArguments[0]);
+        assertEquals(2L, repositoryState.latestArguments[1]);
+        assertEquals(ContentFingerprints.resume(resume), repositoryState.latestArguments[2]);
+    }
+
+    @Test
+    void latestAnalysisIsLookedUpWithCurrentOwnedInputFingerprints() {
+        AnalysisHistory history = new AnalysisHistory();
+        ReflectionTestUtils.setField(history, "id", 12L);
+        history.setUser(user);
+        history.setResume(resume);
+        history.setJobDescription(jobDescription);
+        history.setStatus(AnalysisStatus.COMPLETED);
+        repositoryState.latestOne = Optional.of(history);
+
+        var result = analysisHistoryService.findLatest(2L, 3L);
+
+        assertEquals(12L, result.orElseThrow().id());
+        assertEquals(1L, repositoryState.latestOneArguments[0]);
+        assertEquals(2L, repositoryState.latestOneArguments[1]);
+        assertEquals(3L, repositoryState.latestOneArguments[2]);
+        assertEquals(ContentFingerprints.resume(resume), repositoryState.latestOneArguments[3]);
+        assertEquals(ContentFingerprints.job(jobDescription), repositoryState.latestOneArguments[4]);
     }
 
     @SuppressWarnings("unchecked")
@@ -139,7 +198,10 @@ class AnalysisHistoryServiceSecurityTests {
     private static final class RepositoryState {
         private AnalysisHistory saved;
         private Optional<AnalysisHistory> found = Optional.empty();
-        private List<AnalysisHistory> latest = List.of();
+        private Optional<AnalysisHistory> latestOne = Optional.empty();
+        private Object[] latestOneArguments;
+        private List<AnalysisHistorySummaryResponse> latest = List.of();
+        private Object[] latestArguments;
     }
 
     private static final class FixedCurrentUserService extends CurrentUserService {
@@ -169,7 +231,8 @@ class AnalysisHistoryServiceSecurityTests {
                     proxy(AppUserRepository.class, (ignored, method, args) -> null),
                     null,
                     "unused",
-                    null
+                    null,
+                    SemanticEmbeddingTestSupport.service()
             );
             this.resume = resume;
         }
@@ -191,6 +254,7 @@ class AnalysisHistoryServiceSecurityTests {
                     proxy(JobDescriptionRepository.class, (ignored, method, args) -> null),
                     currentUserService,
                     proxy(AppUserRepository.class, (ignored, method, args) -> null),
+                    SemanticEmbeddingTestSupport.service(),
                     200
             );
             this.jobDescription = jobDescription;

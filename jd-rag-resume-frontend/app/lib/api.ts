@@ -34,6 +34,12 @@ export type Job = {
   updatedAt?: string;
 };
 
+/** Cheap whole-document cosine score; this is not the final RAG/LLM match score. */
+export type JobSemanticMatch = {
+  job: Job;
+  similarity: number;
+};
+
 export type JobDraft = {
   title: string;
   companyName: string;
@@ -59,6 +65,11 @@ export type Analysis = {
   interviewQuestions?: string;
   createdAt: string;
 };
+
+export type AnalysisSummary = Pick<
+  Analysis,
+  "id" | "resumeId" | "jobDescriptionId" | "matchScore" | "status" | "createdAt"
+>;
 
 export type AiStatus = {
   mockEnabled: boolean;

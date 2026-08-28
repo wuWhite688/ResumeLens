@@ -55,6 +55,31 @@ test("source id falls back deterministically when BOSS exposes no detail id", ()
   assert.match(first, /^[0-9a-f]{16}$/);
 });
 
+test("fallback identity includes job content instead of merging similar cards", () => {
+  const common = {
+    ".job-detail-header h1": node("Java 后端工程师"),
+    ".company-info-box .company-name": node("示例科技"),
+  };
+  const first = extractor.extract(
+    fixture(common, { ".job-detail-section .job-sec-text": [node("负责支付系统开发和维护，要求 Java。")]}),
+    "https://www.zhipin.com/web/geek/job?securityId=volatile-one",
+  );
+  const second = extractor.extract(
+    fixture(common, { ".job-detail-section .job-sec-text": [node("负责推荐系统开发和维护，要求 Java。")]}),
+    "https://www.zhipin.com/web/geek/job?securityId=volatile-two",
+  );
+
+  assert.match(first.job.sourceJobId, /^fallback-v2-[0-9a-f]{16}$/);
+  assert.notEqual(first.job.sourceJobId, second.job.sourceJobId);
+});
+
+test("securityId alone is not treated as a stable job id", () => {
+  assert.equal(
+    extractor.sourceJobIdFromUrl("https://www.zhipin.com/web/geek/job?securityId=volatile"),
+    "",
+  );
+});
+
 test("canonical URLs discard tracking query and fragments", () => {
   assert.equal(
     extractor.canonicalizeUrl(

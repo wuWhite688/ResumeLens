@@ -43,10 +43,10 @@ public class BrowserExtensionService {
             }
         }
 
-        AnalysisHistoryResponse analysis = aiAnalysisService.analyze(
+        AiAnalysisService.Submission submission = aiAnalysisService.submit(
                 new AiAnalysisRequest(request.resumeId(), jobId)
         );
-        return response(captured, analysis, false);
+        return response(captured, submission.analysis(), submission.reusedPending());
     }
 
     private BrowserExtensionAnalyzeResponse response(

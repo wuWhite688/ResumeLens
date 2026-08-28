@@ -121,7 +121,8 @@ class ResumeServiceUploadTests {
                 appUserRepository,
                 new ResumeTextExtractor(new ResumeTextQualityValidator()),
                 tempDir.toString(),
-                null
+                null,
+                SemanticEmbeddingTestSupport.service()
         );
         ReflectionTestUtils.setField(service, "maxResumesPerUser", 1);
 
@@ -223,7 +224,8 @@ class ResumeServiceUploadTests {
                 appUserRepository,
                 new ResumeTextExtractor(new ResumeTextQualityValidator()),
                 tempDir.toString(),
-                null
+                null,
+                SemanticEmbeddingTestSupport.service()
         );
     }
 

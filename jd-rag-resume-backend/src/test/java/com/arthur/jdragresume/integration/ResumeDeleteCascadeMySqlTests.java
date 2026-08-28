@@ -108,7 +108,8 @@ class ResumeDeleteCascadeMySqlTests {
                             }),
                             null,
                             tempDir.resolve("uploads").toString(),
-                            vectorIndex
+                            vectorIndex,
+                            com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service()
                     );
                     MockMvc mockMvc = MockMvcBuilders
                             .standaloneSetup(new ResumeController(resumeService))
@@ -168,10 +169,11 @@ class ResumeDeleteCascadeMySqlTests {
                         proxy(AppUserRepository.class, (ignored, method, args) -> {
                             throw new UnsupportedOperationException("Unexpected repository call: " + method.getName());
                         }),
+                        com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service(),
                         200
                 );
                 MockMvc mockMvc = MockMvcBuilders
-                        .standaloneSetup(new JobDescriptionController(service))
+                        .standaloneSetup(new JobDescriptionController(service, null))
                         .build();
 
                 mockMvc.perform(delete("/api/job-descriptions/{id}", rows.jobId()))

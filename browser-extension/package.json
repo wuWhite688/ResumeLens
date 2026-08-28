@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node --test tests/*.test.cjs"
+    "test": "node --check src/popup.js && node --check src/content-boss.js && node --check src/content-resumelens.js && node --test tests/*.test.cjs",
+    "pack": "node scripts/pack.cjs"
   }
 }

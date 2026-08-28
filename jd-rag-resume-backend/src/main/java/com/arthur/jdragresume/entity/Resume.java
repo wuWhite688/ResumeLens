@@ -52,6 +52,16 @@ public class Resume extends AuditableEntity {
     @Column(name = "raw_text", nullable = false, columnDefinition = "LONGTEXT")
     private String rawText = "";
 
+    @Lob
+    @Column(name = "semantic_embedding", columnDefinition = "BLOB")
+    private byte[] semanticEmbedding;
+
+    @Column(name = "semantic_embedding_fingerprint", length = 64)
+    private String semanticEmbeddingFingerprint;
+
+    @Column(name = "semantic_embedding_model_key", length = 64)
+    private String semanticEmbeddingModelKey;
+
     public Long getId() {
         return id;
     }
@@ -102,6 +112,30 @@ public class Resume extends AuditableEntity {
 
     public void setRawText(String rawText) {
         this.rawText = rawText == null ? "" : rawText;
+    }
+
+    public byte[] getSemanticEmbedding() {
+        return semanticEmbedding;
+    }
+
+    public void setSemanticEmbedding(byte[] semanticEmbedding) {
+        this.semanticEmbedding = semanticEmbedding;
+    }
+
+    public String getSemanticEmbeddingFingerprint() {
+        return semanticEmbeddingFingerprint;
+    }
+
+    public void setSemanticEmbeddingFingerprint(String semanticEmbeddingFingerprint) {
+        this.semanticEmbeddingFingerprint = semanticEmbeddingFingerprint;
+    }
+
+    public String getSemanticEmbeddingModelKey() {
+        return semanticEmbeddingModelKey;
+    }
+
+    public void setSemanticEmbeddingModelKey(String semanticEmbeddingModelKey) {
+        this.semanticEmbeddingModelKey = semanticEmbeddingModelKey;
     }
 
     public String getOriginalFileName() {

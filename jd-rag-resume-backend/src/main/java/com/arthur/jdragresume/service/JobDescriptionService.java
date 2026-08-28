@@ -20,11 +20,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 
@@ -33,17 +29,20 @@ public class JobDescriptionService {
     private final JobDescriptionRepository jobDescriptionRepository;
     private final CurrentUserService currentUserService;
     private final AppUserRepository appUserRepository;
+    private final SemanticEmbeddingService semanticEmbeddingService;
     private final int maxJobDescriptionsPerUser;
 
     public JobDescriptionService(
             JobDescriptionRepository jobDescriptionRepository,
             CurrentUserService currentUserService,
             AppUserRepository appUserRepository,
+            SemanticEmbeddingService semanticEmbeddingService,
             @Value("${app.job-description.max-per-user:200}") int maxJobDescriptionsPerUser
     ) {
         this.jobDescriptionRepository = jobDescriptionRepository;
         this.currentUserService = currentUserService;
         this.appUserRepository = appUserRepository;
+        this.semanticEmbeddingService = semanticEmbeddingService;
         this.maxJobDescriptionsPerUser = Math.max(1, maxJobDescriptionsPerUser);
     }
 
@@ -75,6 +74,8 @@ public class JobDescriptionService {
         JobDescription jobDescription = new JobDescription();
         jobDescription.setUser(user);
         applyRequest(jobDescription, request);
+        jobDescription.setContentFingerprint(ContentFingerprints.job(jobDescription));
+        semanticEmbeddingService.refresh(jobDescription);
         return JobDescriptionResponse.from(jobDescriptionRepository.save(jobDescription));
     }
 
@@ -82,13 +83,18 @@ public class JobDescriptionService {
     public List<JobDescriptionResponse> bulkImport(JobDescriptionBulkImportRequest request) {
         AppUser user = lockCurrentUser();
         enforceJobDescriptionCount(user, request.items().size());
-        return request.items().stream()
+        List<JobDescription> jobs = request.items().stream()
                 .map(item -> {
                     JobDescription jobDescription = new JobDescription();
                     jobDescription.setUser(user);
                     applyRequest(jobDescription, item);
-                    return jobDescriptionRepository.save(jobDescription);
+                    jobDescription.setContentFingerprint(ContentFingerprints.job(jobDescription));
+                    return jobDescription;
                 })
+                .toList();
+        semanticEmbeddingService.refreshJobs(jobs);
+        return jobs.stream()
+                .map(jobDescriptionRepository::save)
                 .map(JobDescriptionResponse::from)
                 .toList();
     }
@@ -111,7 +117,14 @@ public class JobDescriptionService {
         AppUser user = lockCurrentUser();
         String sourcePlatform = normalizeSourcePlatform(request.sourcePlatform());
         String sourceJobId = normalizeSourceJobId(request.sourceJobId());
-        String fingerprint = contentFingerprint(request);
+        String fingerprint = ContentFingerprints.job(
+                request.title(),
+                request.companyName(),
+                request.location(),
+                request.employmentType(),
+                request.description(),
+                request.requirements()
+        );
         LocalDateTime now = LocalDateTime.now();
 
         var existing = jobDescriptionRepository.findByUserIdAndSourcePlatformAndSourceJobId(
@@ -125,6 +138,7 @@ public class JobDescriptionService {
             if (contentChanged) {
                 applyCaptureRequest(jobDescription, request);
                 jobDescription.setContentFingerprint(fingerprint);
+                semanticEmbeddingService.refresh(jobDescription);
             }
             jobDescription.setSourceUrl(request.sourceUrl().trim());
             jobDescription.setLastSeenAt(now);
@@ -141,20 +155,25 @@ public class JobDescriptionService {
         jobDescription.setSourceJobId(sourceJobId);
         jobDescription.setContentFingerprint(fingerprint);
         jobDescription.setLastSeenAt(now);
+        semanticEmbeddingService.refresh(jobDescription);
         JobDescription saved = jobDescriptionRepository.save(jobDescription);
         return new JobCaptureResponse(JobDescriptionResponse.from(saved), false, false);
     }
 
     @Transactional
     public JobDescriptionResponse update(Long id, JobDescriptionRequest request) {
-        JobDescription jobDescription = getEntityForCurrentUser(id);
+        AppUser user = lockCurrentUser();
+        JobDescription jobDescription = getEntityForUser(id, user.getId());
         applyRequest(jobDescription, request);
+        jobDescription.setContentFingerprint(ContentFingerprints.job(jobDescription));
+        semanticEmbeddingService.refresh(jobDescription);
         return JobDescriptionResponse.from(jobDescriptionRepository.save(jobDescription));
     }
 
     @Transactional
     public void delete(Long id) {
-        JobDescription jobDescription = getEntityForCurrentUser(id);
+        AppUser user = lockCurrentUser();
+        JobDescription jobDescription = getEntityForUser(id, user.getId());
         jobDescriptionRepository.delete(jobDescription);
     }
 
@@ -185,7 +204,11 @@ public class JobDescriptionService {
     @Transactional(readOnly = true)
     public JobDescription getEntityForCurrentUser(Long id) {
         AppUser user = currentUserService.getCurrentUser();
-        return jobDescriptionRepository.findByIdAndUserId(id, user.getId())
+        return getEntityForUser(id, user.getId());
+    }
+
+    private JobDescription getEntityForUser(Long id, Long userId) {
+        return jobDescriptionRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("job description", id));
     }
 
@@ -221,28 +244,6 @@ public class JobDescriptionService {
             throw new IllegalArgumentException("sourceJobId must contain 1 to 160 characters");
         }
         return normalized;
-    }
-
-    private String contentFingerprint(JobCaptureRequest request) {
-        String canonical = String.join("\n",
-                fingerprintPart(request.title()),
-                fingerprintPart(request.companyName()),
-                fingerprintPart(request.location()),
-                fingerprintPart(request.employmentType()),
-                fingerprintPart(request.description()),
-                fingerprintPart(request.requirements())
-        );
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
-        }
-    }
-
-    private String fingerprintPart(String value) {
-        return value == null ? "" : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private String trimToNull(String value) {

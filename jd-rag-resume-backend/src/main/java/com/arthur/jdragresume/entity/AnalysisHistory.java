@@ -34,6 +34,12 @@ public class AnalysisHistory extends AuditableEntity {
     @JoinColumn(name = "job_description_id", nullable = false)
     private JobDescription jobDescription;
 
+    @Column(length = 64)
+    private String resumeFingerprint;
+
+    @Column(length = 64)
+    private String jobFingerprint;
+
     @Column(precision = 5, scale = 2)
     private BigDecimal matchScore;
 
@@ -91,6 +97,22 @@ public class AnalysisHistory extends AuditableEntity {
 
     public void setJobDescription(JobDescription jobDescription) {
         this.jobDescription = jobDescription;
+    }
+
+    public String getResumeFingerprint() {
+        return resumeFingerprint;
+    }
+
+    public void setResumeFingerprint(String resumeFingerprint) {
+        this.resumeFingerprint = resumeFingerprint;
+    }
+
+    public String getJobFingerprint() {
+        return jobFingerprint;
+    }
+
+    public void setJobFingerprint(String jobFingerprint) {
+        this.jobFingerprint = jobFingerprint;
     }
 
     public BigDecimal getMatchScore() {

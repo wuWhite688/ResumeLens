@@ -1,8 +1,9 @@
-import type { Analysis } from "./lib/api";
+import type { Analysis, AnalysisSummary } from "./lib/api";
 
 export type AnalysisPollResult = {
   analysis: Analysis;
   timedOut: boolean;
+  cancelled: boolean;
 };
 
 export function analysisPollTimeoutMs(pendingTimeoutMinutes?: number) {
@@ -10,6 +11,23 @@ export function analysisPollTimeoutMs(pendingTimeoutMinutes?: number) {
     ? Number(pendingTimeoutMinutes)
     : 10;
   return Math.max(60_000, minutes * 60_000);
+}
+
+export function mergeLatestAnalysisSummaries(
+  remote: AnalysisSummary[],
+  local: AnalysisSummary[],
+) {
+  const latest = new Map<string, AnalysisSummary>();
+  for (const item of [...remote, ...local]) {
+    const key = `${item.resumeId}:${item.jobDescriptionId}`;
+    const previous = latest.get(key);
+    if (!previous
+        || item.id > previous.id
+        || (item.id === previous.id && previous.status === "PENDING" && item.status !== "PENDING")) {
+      latest.set(key, item);
+    }
+  }
+  return [...latest.values()];
 }
 
 export async function pollAnalysisUntilSettled(
@@ -20,6 +38,7 @@ export async function pollAnalysisUntilSettled(
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
     onProgress?: (current: Analysis) => void;
+    shouldContinue?: () => boolean;
   },
 ): Promise<AnalysisPollResult> {
   let current = initial;
@@ -29,7 +48,13 @@ export async function pollAnalysisUntilSettled(
   const deadline = now() + options.timeoutMs;
 
   while (current.status === "PENDING" && now() < deadline) {
+    if (options.shouldContinue && !options.shouldContinue()) {
+      return { analysis: current, timedOut: false, cancelled: true };
+    }
     await sleep(pollIntervalMs(deadline - now()));
+    if (options.shouldContinue && !options.shouldContinue()) {
+      return { analysis: current, timedOut: false, cancelled: true };
+    }
     current = await options.fetchById(current.id);
     options.onProgress?.(current);
   }
@@ -37,6 +62,7 @@ export async function pollAnalysisUntilSettled(
   return {
     analysis: current,
     timedOut: current.status === "PENDING",
+    cancelled: false,
   };
 }
 
