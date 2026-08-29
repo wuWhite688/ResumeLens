@@ -372,7 +372,7 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | POST | `/api/job-descriptions/matches/refresh` | 回填过期的整篇 embedding，然后前端再 GET |
 | POST | `/api/analysis-histories/ai` | 异步启动 AI 匹配（立即返回 PENDING；超限 429） |
 | GET | `/api/analysis-histories` / `{id}` | 历史与轮询（列表 `size` 最大 50） |
-| PUT/DELETE | `/api/analysis-histories/{id}` | 更新 / 删除记录 |
+| DELETE | `/api/analysis-histories/{id}` | 删除记录 |
 
 统一响应：`{ success, code, message, data }`。
 

@@ -3,7 +3,6 @@ package com.arthur.jdragresume.controller;
 import com.arthur.jdragresume.common.ApiResponse;
 import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.analysis.AiAnalysisRequest;
-import com.arthur.jdragresume.dto.analysis.AnalysisHistoryRequest;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryResponse;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.service.AiAnalysisService;
@@ -14,7 +13,6 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -68,21 +66,10 @@ public class AnalysisHistoryController {
         return ApiResponse.ok(analysisHistoryService.findLatestForEachJob(resumeId));
     }
 
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<AnalysisHistoryResponse> create(@Valid @RequestBody AnalysisHistoryRequest request) {
-        return ApiResponse.ok(analysisHistoryService.create(request));
-    }
-
     @PostMapping("/ai")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AnalysisHistoryResponse> analyzeWithAi(@Valid @RequestBody AiAnalysisRequest request) {
         return ApiResponse.ok(aiAnalysisService.analyze(request));
-    }
-
-    @PutMapping("/{id}")
-    public ApiResponse<AnalysisHistoryResponse> update(@PathVariable Long id, @Valid @RequestBody AnalysisHistoryRequest request) {
-        return ApiResponse.ok(analysisHistoryService.update(id, request));
     }
 
     @DeleteMapping("/{id}")

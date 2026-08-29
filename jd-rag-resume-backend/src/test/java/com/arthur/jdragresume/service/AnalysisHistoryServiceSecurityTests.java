@@ -1,20 +1,17 @@
 package com.arthur.jdragresume.service;
 
-import com.arthur.jdragresume.dto.analysis.AnalysisHistoryRequest;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.entity.AnalysisHistory;
 import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
-import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.repository.ResumeChunkRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -26,8 +23,6 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AnalysisHistoryServiceSecurityTests {
     private RepositoryState repositoryState;
@@ -42,11 +37,6 @@ class AnalysisHistoryServiceSecurityTests {
         AnalysisHistoryRepository analysisHistoryRepository = proxy(
                 AnalysisHistoryRepository.class,
                 (ignored, method, args) -> switch (method.getName()) {
-                    case "save" -> {
-                        repositoryState.saved = (AnalysisHistory) args[0];
-                        yield repositoryState.saved;
-                    }
-                    case "findByIdAndUserId" -> repositoryState.found;
                     case "findFirstByUser_IdAndResume_IdAndJobDescription_IdAndResumeFingerprintAndJobFingerprintOrderByIdDesc" -> {
                         repositoryState.latestOneArguments = args.clone();
                         yield repositoryState.latestOne;
@@ -81,71 +71,6 @@ class AnalysisHistoryServiceSecurityTests {
                 new FixedResumeService(currentUserService, resume),
                 new FixedJobDescriptionService(currentUserService, jobDescription)
         );
-    }
-
-    @Test
-    void manualPostCannotPersistClientSuppliedScoreOrStatus() throws Exception {
-        AnalysisHistoryRequest request = new ObjectMapper().readValue(
-                """
-                        {
-                          "resumeId": 2,
-                          "jobDescriptionId": 3,
-                          "matchScore": 100,
-                          "status": "COMPLETED",
-                          "summary": "client supplied"
-                        }
-                        """,
-                AnalysisHistoryRequest.class
-        );
-
-        analysisHistoryService.create(request);
-
-        assertNull(repositoryState.saved.getMatchScore());
-        assertEquals(AnalysisStatus.PENDING, repositoryState.saved.getStatus());
-        assertEquals("client supplied", repositoryState.saved.getSummary());
-    }
-
-    @Test
-    void manualUpdatePreservesAiControlledScoreAndStatus() {
-        AnalysisHistory history = new AnalysisHistory();
-        history.setUser(user);
-        history.setResume(resume);
-        history.setJobDescription(jobDescription);
-        history.setMatchScore(new BigDecimal("87.50"));
-        history.setStatus(AnalysisStatus.COMPLETED);
-        repositoryState.found = Optional.of(history);
-
-        analysisHistoryService.update(
-                7L,
-                new AnalysisHistoryRequest(2L, 3L, "edited summary")
-        );
-
-        assertEquals(new BigDecimal("87.50"), history.getMatchScore());
-        assertEquals(AnalysisStatus.COMPLETED, history.getStatus());
-        assertEquals("edited summary", history.getSummary());
-        assertNull(history.getResumeFingerprint());
-        assertNull(history.getJobFingerprint());
-    }
-
-    @Test
-    void manualUpdateCannotMoveACompletedResultToDifferentInputs() {
-        AnalysisHistory history = new AnalysisHistory();
-        history.setUser(user);
-        history.setResume(resume);
-        history.setJobDescription(jobDescription);
-        history.setStatus(AnalysisStatus.COMPLETED);
-        repositoryState.found = Optional.of(history);
-
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> analysisHistoryService.update(
-                        7L,
-                        new AnalysisHistoryRequest(2L, 99L, "moved summary")
-                )
-        );
-
-        assertEquals("ANALYSIS_INPUT_IMMUTABLE", exception.getCode());
-        assertNull(history.getSummary());
     }
 
     @Test
@@ -196,8 +121,6 @@ class AnalysisHistoryServiceSecurityTests {
     }
 
     private static final class RepositoryState {
-        private AnalysisHistory saved;
-        private Optional<AnalysisHistory> found = Optional.empty();
         private Optional<AnalysisHistory> latestOne = Optional.empty();
         private Object[] latestOneArguments;
         private List<AnalysisHistorySummaryResponse> latest = List.of();
