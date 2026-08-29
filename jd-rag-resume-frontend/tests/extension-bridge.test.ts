@@ -137,6 +137,30 @@ test("analyze forwards the editable captured job as JSON", async () => {
   assert.equal("retrievedContext" in result.analysis, false);
 });
 
+test("latestAnalysis still reads GET /api/analysis-histories/latest", async () => {
+  let capturedPath = "";
+  await dispatchExtensionBridgeRequest(
+    request("latestAnalysis", { resumeId: 7, jobDescriptionId: 11 }),
+    (async (path: string) => {
+      capturedPath = path;
+      return { id: 88, status: "COMPLETED" };
+    }) as never,
+  );
+  assert.equal(capturedPath, "/api/analysis-histories/latest?resumeId=7&jobDescriptionId=11");
+});
+
+test("getAnalysis still reads GET /api/analysis-histories/{id}", async () => {
+  let capturedPath = "";
+  await dispatchExtensionBridgeRequest(
+    request("getAnalysis", { id: 88 }),
+    (async (path: string) => {
+      capturedPath = path;
+      return { id: 88, status: "PENDING" };
+    }) as never,
+  );
+  assert.equal(capturedPath, "/api/analysis-histories/88");
+});
+
 test("rejects malformed source identities before an API call", async () => {
   await assert.rejects(
     dispatchExtensionBridgeRequest(

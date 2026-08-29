@@ -1,15 +1,12 @@
 package com.arthur.jdragresume.service;
 
 import com.arthur.jdragresume.common.PageResponse;
-import com.arthur.jdragresume.dto.analysis.AnalysisHistoryRequest;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryResponse;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.entity.AnalysisHistory;
-import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
-import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -83,28 +80,6 @@ public class AnalysisHistoryService {
     }
 
     @Transactional
-    public AnalysisHistoryResponse create(AnalysisHistoryRequest request) {
-        AnalysisHistory history = new AnalysisHistory();
-        history.setStatus(AnalysisStatus.PENDING);
-        applyRequest(history, request);
-        return AnalysisHistoryResponse.from(analysisHistoryRepository.save(history));
-    }
-
-    @Transactional
-    public AnalysisHistoryResponse update(Long id, AnalysisHistoryRequest request) {
-        AnalysisHistory history = getEntityForCurrentUser(id);
-        if (!history.getResume().getId().equals(request.resumeId())
-                || !history.getJobDescription().getId().equals(request.jobDescriptionId())) {
-            throw new BusinessException(
-                    "ANALYSIS_INPUT_IMMUTABLE",
-                    "analysis resume and job cannot be changed after submission"
-            );
-        }
-        history.setSummary(request.summary());
-        return AnalysisHistoryResponse.from(analysisHistoryRepository.save(history));
-    }
-
-    @Transactional
     public void delete(Long id) {
         AnalysisHistory history = getEntityForCurrentUser(id);
         analysisHistoryRepository.delete(history);
@@ -115,21 +90,6 @@ public class AnalysisHistoryService {
         AppUser user = currentUserService.getCurrentUser();
         return analysisHistoryRepository.findByIdAndUserId(id, user.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("analysis history", id));
-    }
-
-    private void applyRequest(AnalysisHistory history, AnalysisHistoryRequest request) {
-        AppUser user = currentUserService.getCurrentUser();
-        Resume resume = resumeService.getEntityForCurrentUser(request.resumeId());
-        JobDescription jobDescription = jobDescriptionService.getEntityForCurrentUser(request.jobDescriptionId());
-
-        history.setUser(user);
-        history.setResume(resume);
-        history.setJobDescription(jobDescription);
-        history.setResumeFingerprint(ContentFingerprints.resume(resume));
-        String jobFingerprint = ContentFingerprints.job(jobDescription);
-        jobDescription.setContentFingerprint(jobFingerprint);
-        history.setJobFingerprint(jobFingerprint);
-        history.setSummary(request.summary());
     }
 
     private String normalizeKeyword(String keyword) {

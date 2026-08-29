@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -87,6 +88,14 @@ class GlobalExceptionHandlerTests {
         assertEquals(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 handler.handleBusiness(new BusinessException("FILE_SAVE_FAILED", "disk is full")).getStatusCode()
+        );
+    }
+
+    @Test
+    void mapsUnsupportedHttpMethodTo405() {
+        assertEquals(
+                HttpStatus.METHOD_NOT_ALLOWED,
+                handler.handleMethodNotAllowed(new HttpRequestMethodNotSupportedException("PUT")).getStatusCode()
         );
     }
 
