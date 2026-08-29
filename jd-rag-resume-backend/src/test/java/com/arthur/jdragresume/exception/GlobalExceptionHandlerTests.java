@@ -67,6 +67,22 @@ class GlobalExceptionHandlerTests {
     }
 
     @Test
+    void mapsEmbeddingFailuresTo503() {
+        // 语义粗排与 RAG 共用同一套本地 embedding；瞬时失败都应让客户端稍后重试，
+        // 而不是落到 default 400 被当成请求错误。
+        assertEquals(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                handler.handleBusiness(new BusinessException("RAG_EMBEDDING_FAILED", "embed failed")).getStatusCode()
+        );
+        assertEquals(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                handler.handleBusiness(
+                        new BusinessException("SEMANTIC_EMBEDDING_FAILED", "semantic ranking embedding is temporarily unavailable")
+                ).getStatusCode()
+        );
+    }
+
+    @Test
     void mapsFileSaveFailureTo500() {
         assertEquals(
                 HttpStatus.INTERNAL_SERVER_ERROR,
