@@ -3,6 +3,7 @@ package com.arthur.jdragresume.service;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
+import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
@@ -16,11 +17,55 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JobSemanticMatchServiceTests {
     @Test
-    void backfillsOnlyStaleVectorsThenReturnsHighestCosineCandidate() {
+    void rankReadsCurrentVectorsWithoutRepositoryWrites() {
+        Fixture fixture = fixture(null, null);
+
+        var result = fixture.service.rank(11L, 1);
+
+        assertEquals(1, result.size());
+        assertEquals(22L, result.getFirst().job().id());
+        assertEquals(0.87, result.getFirst().similarity(), 0.000001);
+        assertNull(fixture.embeddings.refreshedResume);
+        assertEquals(List.of(), fixture.embeddings.refreshedJobs);
+        assertNull(fixture.savedResume.get());
+        assertNull(fixture.savedJobs.get());
+    }
+
+    @Test
+    void rankReportsStaleVectorsWithoutRefreshingOrSavingThem() {
+        Fixture fixture = fixture(null, 21L);
+
+        BusinessException error = assertThrows(
+                BusinessException.class,
+                () -> fixture.service.rank(11L, 200)
+        );
+
+        assertEquals("SEMANTIC_EMBEDDING_STALE", error.getCode());
+        assertNull(fixture.embeddings.refreshedResume);
+        assertEquals(List.of(), fixture.embeddings.refreshedJobs);
+        assertNull(fixture.savedResume.get());
+        assertNull(fixture.savedJobs.get());
+    }
+
+    @Test
+    void explicitRefreshUpdatesOnlyStaleVectors() {
+        Fixture fixture = fixture(11L, 21L);
+
+        fixture.service.refreshStaleEmbeddings(11L);
+
+        assertSame(fixture.resume, fixture.embeddings.refreshedResume);
+        assertSame(fixture.resume, fixture.savedResume.get());
+        assertEquals(List.of(fixture.lower), fixture.embeddings.refreshedJobs);
+        assertEquals(List.of(fixture.lower), fixture.savedJobs.get());
+    }
+
+    private static Fixture fixture(Long staleResumeId, Long staleJobId) {
         AppUser user = new AppUser();
         user.setUsername("arthur");
         ReflectionTestUtils.setField(user, "id", 7L);
@@ -57,23 +102,14 @@ class JobSemanticMatchServiceTests {
                     default -> throw new UnsupportedOperationException(method.getName());
                 }
         );
-        TrackingEmbeddings embeddings = new TrackingEmbeddings(resume, lower);
+        TrackingEmbeddings embeddings = new TrackingEmbeddings(staleResumeId, staleJobId);
         JobSemanticMatchService service = new JobSemanticMatchService(
                 jobs,
                 resumes,
                 fixedCurrentUser(user),
                 embeddings
         );
-
-        var result = service.rank(11L, 1);
-
-        assertEquals(1, result.size());
-        assertEquals(22L, result.getFirst().job().id());
-        assertEquals(0.87, result.getFirst().similarity(), 0.000001);
-        assertSame(resume, embeddings.refreshedResume);
-        assertSame(resume, savedResume.get());
-        assertEquals(List.of(lower), embeddings.refreshedJobs);
-        assertEquals(List.of(lower), savedJobs.get());
+        return new Fixture(service, embeddings, resume, lower, savedResume, savedJobs);
     }
 
     private static JobDescription job(AppUser user, Long id, String title, String description) {
@@ -101,28 +137,28 @@ class JobSemanticMatchServiceTests {
     }
 
     private static final class TrackingEmbeddings extends SemanticEmbeddingService {
-        private final Resume staleResume;
-        private final JobDescription staleJob;
+        private final Long staleResumeId;
+        private final Long staleJobId;
         private Resume refreshedResume;
         private List<JobDescription> refreshedJobs = List.of();
 
-        private TrackingEmbeddings(Resume staleResume, JobDescription staleJob) {
+        private TrackingEmbeddings(Long staleResumeId, Long staleJobId) {
             super(
                     SemanticEmbeddingTestSupport.model(text -> new float[]{1.0f, 0.0f, 0.0f}),
                     SemanticEmbeddingTestSupport.properties(3)
             );
-            this.staleResume = staleResume;
-            this.staleJob = staleJob;
+            this.staleResumeId = staleResumeId;
+            this.staleJobId = staleJobId;
         }
 
         @Override
         public boolean isCurrent(Resume resume) {
-            return resume != staleResume;
+            return !resume.getId().equals(staleResumeId);
         }
 
         @Override
         public boolean isCurrent(JobDescription job) {
-            return job != staleJob;
+            return !job.getId().equals(staleJobId);
         }
 
         @Override
@@ -139,5 +175,15 @@ class JobSemanticMatchServiceTests {
         public double similarity(Resume resume, JobDescription job) {
             return job.getId() == 22L ? 0.87 : 0.61;
         }
+    }
+
+    private record Fixture(
+            JobSemanticMatchService service,
+            TrackingEmbeddings embeddings,
+            Resume resume,
+            JobDescription lower,
+            AtomicReference<Resume> savedResume,
+            AtomicReference<List<JobDescription>> savedJobs
+    ) {
     }
 }

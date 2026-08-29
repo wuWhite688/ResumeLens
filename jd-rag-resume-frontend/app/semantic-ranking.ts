@@ -1,4 +1,36 @@
-import type { AnalysisSummary, JobSemanticMatch } from "./lib/api";
+import type { AnalysisSummary, ApiError, JobSemanticMatch } from "./lib/api";
+
+export const DEFAULT_JOB_SORT = "semantic" as const;
+const STALE_EMBEDDING_CODE = "SEMANTIC_EMBEDDING_STALE";
+
+type ApiRequester = <T>(path: string, init?: RequestInit) => Promise<T>;
+
+/**
+ * Keep the GET endpoint read-only. Only stale derived data takes the explicit
+ * POST refresh path, after which the ranking read is retried once.
+ */
+export async function requestSemanticMatches(
+  resumeId: number,
+  request: ApiRequester,
+): Promise<JobSemanticMatch[]> {
+  const matchesPath = `/api/job-descriptions/matches?resumeId=${resumeId}&limit=200`;
+  try {
+    return await request<JobSemanticMatch[]>(matchesPath);
+  } catch (reason) {
+    if (!hasApiErrorCode(reason, STALE_EMBEDDING_CODE)) throw reason;
+    await request<void>(
+      `/api/job-descriptions/matches/refresh?resumeId=${resumeId}`,
+      { method: "POST" },
+    );
+    return request<JobSemanticMatch[]>(matchesPath);
+  }
+}
+
+function hasApiErrorCode(reason: unknown, code: string): reason is ApiError {
+  return reason instanceof Error
+    && "code" in reason
+    && (reason as { code?: unknown }).code === code;
+}
 
 /**
  * Keep coarse retrieval separate from expensive analysis: take the semantic Top N,

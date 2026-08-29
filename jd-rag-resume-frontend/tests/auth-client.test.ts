@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ApiError,
   apiRequest,
   clearAuthSession,
   logoutSession,
@@ -169,6 +170,20 @@ test("a successful 204 response resolves without trying to parse an envelope", a
   const result = await apiRequest<void>("/api/resumes/1", { method: "DELETE" });
 
   assert.equal(result, undefined);
+});
+
+test("API failures preserve the backend code and HTTP status", async () => {
+  globalThis.fetch = async () => Response.json(
+    { success: false, code: "SEMANTIC_EMBEDDING_STALE", message: "refresh required", data: null },
+    { status: 409 },
+  );
+
+  await assert.rejects(
+    () => apiRequest("/api/job-descriptions/matches?resumeId=7"),
+    (reason) => reason instanceof ApiError
+      && reason.code === "SEMANTIC_EMBEDDING_STALE"
+      && reason.status === 409,
+  );
 });
 
 test("the backend proxy rewrites the refresh cookie path for the browser route", async () => {
