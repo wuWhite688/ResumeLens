@@ -4,7 +4,7 @@
 
 基于 **本地向量检索 + 大模型生成** 的简历 / 职位（JD）智能匹配系统。
 
-后端用 Spring Boot 完成鉴权、持久化、异步分析与「关键词重排 + 语义阈值门控」的 RAG 检索；前端 ResumeLens 工作台覆盖「录入 → 匹配 → 证据链报告 → 导出」完整闭环。适合作为 Java 后端 + RAG 工程化作品集项目。
+后端用 Spring Boot 完成鉴权、持久化、岗位库向量粗排与异步精析；精析走「关键词重排 + 语义阈值门控」的 RAG。工作台默认是「一份简历对岗位库排序，再对 Top N 出证据链报告」。适合作为 Java 后端 + RAG 工程化作品集项目。
 
 | 层 | 技术 |
 |----|------|
@@ -54,7 +54,7 @@
 - **职位 JD**：创建、编辑、删除、**JSON 批量导入**（前端入口 + `POST /api/job-descriptions/import`，每用户最多 200 条）
 - **BOSS 浏览器扩展**：点击后以 `activeTab` 临时读取当前 JD、允许提交前校正、选择已存简历并在扩展内查看分析；优先按稳定岗位 ID 查重，缺失时使用完整岗位内容指纹（见 [`browser-extension/`](browser-extension/)）
 - **独立详情页**：`/resumes/[id]`、`/jobs/[id]`（查看 / 编辑 / 删除，复用已有 GET/PUT/DELETE）
-- **智能匹配**：异步分析任务（同一简历+JD 的 PENDING 去重；每用户最多 2 条进行中、10 分钟 10 次）；关键词重排 + 语义阈值门控召回证据；硬技能覆盖与服务端分数上限
+- **两阶段匹配（默认）**：岗位库按整篇向量余弦粗排（每用户最多 200 条 JD）；`GET /api/job-descriptions/matches` 只读，过期 embedding 返回 `409 SEMANTIC_EMBEDDING_STALE`，显式 `POST /api/job-descriptions/matches/refresh` 后再读。精析只打语义 Top N：异步分析（同一简历+JD 的 PENDING 去重；每用户最多 2 条进行中、10 分钟 10 次）；关键词重排 + 语义阈值门控召回证据；硬技能覆盖与服务端分数上限
 - **可解释报告**：匹配分、优势 / 缺口 / 建议 / 面试题、chunk 级证据与 `[chunk-N]` 引用
 - **导出**：匹配报告 **Markdown** 下载、**PDF**（浏览器打印另存为 PDF，完整中文）
 - **可靠性**：PENDING 超时回收、任务队列满保护、解析文本质量校验、列表分页最大 50
@@ -85,6 +85,13 @@
 
 ---
 
+## 默认匹配流程（两阶段）
+
+岗位库**默认按向量相似度排序**，不是按最近保存。粗排和精析不是同一条检索。
+
+1. **粗排**：简历与库内每条 JD 各一条整篇 embedding（受模型 `maxLength` 截断，默认 8192 token），最多 200 条做内存余弦排序。`GET /api/job-descriptions/matches` **只读**，不在 GET 里回填向量。缓存过期返回 `409 SEMANTIC_EMBEDDING_STALE`；前端调用 `POST /api/job-descriptions/matches/refresh` 后再 GET 一次。embedding 配置（模型 id、权重/分词器 SHA-256、pooling、维度、queryPrefix 等）打成 `modelKey`，配置一变旧缓存失效。
+2. **精析**：仅对语义 Top N 走下方分块 RAG + LLM。Top N 由前端 `semanticAnalysisTargets` 选取（跳过已有 COMPLETED 分析）；真正提交仍受每用户 2 条进行中、10 分钟 10 次限制。无过阈证据则 0 分且不调 LLM。
+
 ## 架构（主链路）
 
 ```mermaid
@@ -93,9 +100,12 @@ flowchart TD
     P["Next.js 代理<br/>/api/backend/*"]
     SEC["JWT Security<br/>Access 15min + 可撤销 Refresh 7d"]
     CRUD["简历 / JD CRUD"]
+    RANK["GET /api/job-descriptions/matches<br/>整篇向量余弦粗排 · 只读"]
+    REFRESH["POST /matches/refresh<br/>仅过期时显式回填"]
+    TOPN["前端语义 Top N"]
     SUBMIT["POST /api/analysis-histories/ai<br/>落库 PENDING 后立即返回"]
     W["AiAnalysisWorker（异步）"]
-    RAG["RAG 检索<br/>关键词重排 + 语义阈值门控<br/>见下方检索链路"]
+    RAG["精析 RAG<br/>分块 + Lucene KNN<br/>关键词重排 + 语义阈值门控"]
     GATE{"有 chunk 过阈？"}
     LLM["OpenAI 兼容 Chat<br/>DeepSeek / mock"]
     SCORE["constrainScore<br/>硬技能覆盖 + 分数上限"]
@@ -105,7 +115,9 @@ flowchart TD
 
     B --> P --> SEC
     SEC --> CRUD --> DB
-    SEC --> SUBMIT --> DB
+    SEC --> RANK
+    RANK -. 409 STALE .-> REFRESH --> RANK
+    RANK --> TOPN --> SUBMIT --> DB
     SUBMIT -. 提交异步任务 .-> W
     W --> RAG --> GATE
     GATE -- 是 --> LLM --> SCORE
@@ -356,6 +368,8 @@ node --experimental-strip-types --test tests/report-export.test.ts
 | GET/POST | `/api/job-descriptions` | 列表（`size` 最大 50）/ 创建 |
 | POST | `/api/job-descriptions/import` | 批量导入（单次最多 50 条，计入 200 条配额）|
 | GET/PUT/DELETE | `/api/job-descriptions/{id}` | 详情 / 更新 / 删除 |
+| GET | `/api/job-descriptions/matches` | 相对某份简历的岗位库余弦粗排（只读；过期返回 409 `SEMANTIC_EMBEDDING_STALE`） |
+| POST | `/api/job-descriptions/matches/refresh` | 回填过期的整篇 embedding，然后前端再 GET |
 | POST | `/api/analysis-histories/ai` | 异步启动 AI 匹配（立即返回 PENDING；超限 429） |
 | GET | `/api/analysis-histories` / `{id}` | 历史与轮询（列表 `size` 最大 50） |
 | PUT/DELETE | `/api/analysis-histories/{id}` | 更新 / 删除记录 |
@@ -390,11 +404,12 @@ node --experimental-strip-types --test tests/report-export.test.ts
 
 ## 作品集演示建议
 
-1. 注册账号 → 「一键示例匹配」走通异步分析与证据链  
-2. 打开报告：查看 kept / filtered、相似度、硬技能相关缺口  
-3. **导出 Markdown / PDF**，展示可交付物  
-4. 编辑 / 删除简历或 JD，再重新匹配，体现 CRUD 与索引失效重建  
-5. （可选）用一份无关领域简历对比，说明阈值与 0 分兜底  
+1. 注册账号 → 导入或抓取若干 JD → 岗位库默认按向量粗排  
+2. 对语义 Top N 发起精析，走通异步分析与证据链  
+3. 打开报告：查看 kept / filtered、相似度、硬技能相关缺口  
+4. **导出 Markdown / PDF**，展示可交付物  
+5. 编辑 / 删除简历或 JD，再重新匹配，体现 CRUD、粗排缓存失效与 Lucene 重建  
+6. （可选）用一份无关领域简历对比，说明阈值与 0 分兜底  
 
 ---
 
@@ -405,6 +420,9 @@ node --experimental-strip-types --test tests/report-export.test.ts
 - 旧的 Hibernate 建表数据库会由 Flyway baseline 为 V1；新数据库直接执行版本化迁移  
 - Compose 首次启动需下载本地 GTE 模型，耗时取决于网络  
 - `RealEmbeddingRegressionTests` 与实验型 `ThresholdSweepExperimentTests` 默认跳过，需环境变量开启（`RUN_EMBEDDING_REGRESSION` / `RUN_THRESHOLD_SWEEP_PREVIEW` / `RUN_THRESHOLD_SWEEP` / `RUN_RAG_ABLATION`）
+- 粗排是整篇文档向量，精析才是 chunk 级 Lucene；超长简历粗排会被 `maxLength` 截断
+- `GET /matches` 不写库；`SEMANTIC_EMBEDDING_FAILED` 与 `RAG_EMBEDDING_FAILED` 一样返回 503
+- 精析 Top N 的选取在前端；后端配额仍然限制并发分析次数
 
 这些不影响主链路演示；公开部署前仍应继续做密钥外置与运行环境加固。
 
