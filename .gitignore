@@ -23,16 +23,6 @@ dist/
 *.tsbuildinfo
 next-env.d.ts
 
-# vite.config.ts 导入 ./build/sites-vite-plugin，它是构建链的真实一环
-# （closeBundle 时把 .openai/hosting.json 与 drizzle/ 拷进 dist/.openai）。
-# 上面 "Java and Gradle build output" 段的 build/ 会连它一起排除，导致
-# 新 clone 必然构建失败，而本机因为还留着这个被忽略的文件而侥幸能跑。
-# 三段式顺序缺一不可：先解除目录本身的忽略（git 不会进入被忽略的目录），
-# 再忽略目录内全部内容，最后单独放行这一个源文件。
-!jd-rag-resume-frontend/build/
-jd-rag-resume-frontend/build/*
-!jd-rag-resume-frontend/build/sites-vite-plugin.ts
-
 # Local environment files
 .env
 compose.env
