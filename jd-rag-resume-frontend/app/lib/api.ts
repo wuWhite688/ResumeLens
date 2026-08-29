@@ -92,6 +92,18 @@ export type AuthResponse = {
 export const API_PREFIX = "/api/backend";
 export const AUTH_EXPIRED_EVENT = "jd-rag-auth-expired";
 
+export class ApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 type ApiRequestOptions = {
   auth?: boolean;
   retryAuth?: boolean;
@@ -199,7 +211,11 @@ export async function apiRequest<T>(
   }
   const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
   if (!response.ok || !payload?.success) {
-    throw new Error(payload?.message || `请求失败（${response.status}）`);
+    throw new ApiError(
+      payload?.code || `HTTP_${response.status}`,
+      payload?.message || `请求失败（${response.status}）`,
+      response.status,
+    );
   }
   return payload.data;
 }

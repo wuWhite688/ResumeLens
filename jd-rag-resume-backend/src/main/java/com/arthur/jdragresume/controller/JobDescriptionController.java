@@ -66,6 +66,12 @@ public class JobDescriptionController {
         return ApiResponse.ok(jobSemanticMatchService.rank(resumeId, limit));
     }
 
+    @PostMapping("/matches/refresh")
+    public ApiResponse<Void> refreshSemanticMatchEmbeddings(@RequestParam Long resumeId) {
+        jobSemanticMatchService.refreshStaleEmbeddings(resumeId);
+        return ApiResponse.ok();
+    }
+
     @GetMapping("/source")
     public ApiResponse<JobSourceLookupResponse> findBySource(
             @RequestParam @NotBlank @Size(max = 32) String sourcePlatform,

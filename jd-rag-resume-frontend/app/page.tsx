@@ -44,7 +44,11 @@ import {
 } from "./analysis-poll";
 import { coverRequirements, coverageSummary } from "./requirement-coverage";
 import { appendResumeUploadFields, prepareResumeUploadDraft, resumeFormFrom } from "./resume-upload";
-import { semanticAnalysisTargets } from "./semantic-ranking";
+import {
+  DEFAULT_JOB_SORT,
+  requestSemanticMatches,
+  semanticAnalysisTargets,
+} from "./semantic-ranking";
 
 const EMPTY_RESUME_FORM = {
   title: "",
@@ -200,7 +204,7 @@ export default function Home() {
   const [jobsTotal, setJobsTotal] = useState(0);
   const [jobsPage, setJobsPage] = useState(0);
   const [jobsLoadingMore, setJobsLoadingMore] = useState(false);
-  const [jobSort, setJobSort] = useState<JobSort>("recent");
+  const [jobSort, setJobSort] = useState<JobSort>(DEFAULT_JOB_SORT);
   const [jobFilter, setJobFilter] = useState<JobFilter>("all");
   const [jobLatestAnalyses, setJobLatestAnalyses] = useState<AnalysisSummary[]>([]);
   const [jobAnalysesResumeId, setJobAnalysesResumeId] = useState<number | null>(null);
@@ -272,6 +276,7 @@ export default function Home() {
     setJobs([]);
     setJobsTotal(0);
     setJobsPage(0);
+    setJobSort(DEFAULT_JOB_SORT);
     setJobLatestAnalyses([]);
     setJobAnalysesResumeId(null);
     setJobAnalysesStatus("idle");
@@ -404,9 +409,7 @@ export default function Home() {
     setJobSemanticStatus("loading");
     setJobSemanticError("");
     try {
-      const items = await apiRequest<JobSemanticMatch[]>(
-        `/api/job-descriptions/matches?resumeId=${resumeId}&limit=200`,
-      );
+      const items = await requestSemanticMatches(resumeId, apiRequest);
       if (generation !== jobSemanticRequestGeneration.current) return null;
       setJobSemanticMatches(items);
       setJobSemanticResumeId(resumeId);
@@ -1255,8 +1258,8 @@ export default function Home() {
                     setJobSort(next);
                     if (next === "score" || next === "analyzed") void loadAllJobsForRanking();
                   }} disabled={jobsLoadingMore}>
-                    <option value="recent">最近保存</option>
                     <option value="semantic">向量粗排</option>
+                    <option value="recent">最近保存</option>
                     <option value="score">已分析匹配分</option>
                     <option value="analyzed">最近分析</option>
                   </select>
