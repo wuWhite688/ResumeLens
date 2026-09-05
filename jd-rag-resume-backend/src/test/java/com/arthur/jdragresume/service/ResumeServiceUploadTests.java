@@ -3,6 +3,7 @@ package com.arthur.jdragresume.service;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.exception.BusinessException;
+import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.ResumeChunkRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
@@ -85,6 +86,61 @@ class ResumeServiceUploadTests {
     }
 
     @Test
+    void rejectsDeleteWhileAnAnalysisUsingTheResumeIsStillPending(@TempDir Path tempDir) {
+        AppUser user = user();
+        Resume resume = new Resume();
+        resume.setUser(user);
+        resume.setTitle("Backend");
+        resume.setCandidateName("Arthur");
+        resume.setRawText("Java");
+        ReflectionTestUtils.setField(resume, "id", 5L);
+
+        AtomicInteger deletes = new AtomicInteger();
+        ResumeRepository resumeRepository = proxy(ResumeRepository.class, (ignored, method, args) ->
+                switch (method.getName()) {
+                    case "findByIdAndUserId" -> Optional.of(resume);
+                    case "delete" -> {
+                        deletes.incrementAndGet();
+                        yield null;
+                    }
+                    case "toString" -> "ResumeRepositoryTestDouble";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        AppUserRepository appUserRepository = proxy(AppUserRepository.class, (ignored, method, args) ->
+                switch (method.getName()) {
+                    case "findByIdForUpdate" -> Optional.of(user);
+                    case "toString" -> "AppUserRepositoryTestDouble";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        AnalysisHistoryRepository analysisHistoryRepository =
+                proxy(AnalysisHistoryRepository.class, (ignored, method, args) ->
+                        switch (method.getName()) {
+                            case "existsByResume_IdAndStatus" -> true;
+                            case "toString" -> "AnalysisHistoryRepositoryTestDouble";
+                            default -> throw new UnsupportedOperationException(method.getName());
+                        });
+        ResumeService service = new ResumeService(
+                resumeRepository,
+                proxy(ResumeChunkRepository.class, (ignored, method, args) -> {
+                    throw new UnsupportedOperationException(method.getName());
+                }),
+                currentUser(user),
+                appUserRepository,
+                new ResumeTextExtractor(new ResumeTextQualityValidator()),
+                tempDir.toString(),
+                null,
+                SemanticEmbeddingTestSupport.service(),
+                analysisHistoryRepository
+        );
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.delete(5L));
+
+        assertEquals("ANALYSIS_DELETE_PENDING", exception.getCode());
+        // 级联删除会连带删掉 PENDING 历史，把"进行中"计数凭空清掉，所以这里必须一行都不删
+        assertEquals(0, deletes.get());
+    }
+
+    @Test
     void concurrentCreatesWithOneSlotAllowAtMostOneSuccess(@TempDir Path tempDir) throws Exception {
         AtomicLong count = new AtomicLong(0);
         ReentrantLock userLock = new ReentrantLock();
@@ -122,7 +178,8 @@ class ResumeServiceUploadTests {
                 new ResumeTextExtractor(new ResumeTextQualityValidator()),
                 tempDir.toString(),
                 null,
-                SemanticEmbeddingTestSupport.service()
+                SemanticEmbeddingTestSupport.service(),
+                null
         );
         ReflectionTestUtils.setField(service, "maxResumesPerUser", 1);
 
@@ -225,7 +282,8 @@ class ResumeServiceUploadTests {
                 new ResumeTextExtractor(new ResumeTextQualityValidator()),
                 tempDir.toString(),
                 null,
-                SemanticEmbeddingTestSupport.service()
+                SemanticEmbeddingTestSupport.service(),
+                null
         );
     }
 
