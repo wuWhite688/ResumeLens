@@ -120,8 +120,10 @@ class BrowserExtensionServiceTests {
     private static final class FixedJobDescriptionService extends JobDescriptionService {
         private JobCaptureResponse result;
 
+        // 只覆盖 capture()，delete() 不会被调用，所以新增的
+        // AnalysisHistoryRepository 依赖传 null 即可。
         private FixedJobDescriptionService() {
-            super(null, null, null, SemanticEmbeddingTestSupport.service(), 200);
+            super(null, null, null, SemanticEmbeddingTestSupport.service(), null, 200);
         }
 
         @Override
