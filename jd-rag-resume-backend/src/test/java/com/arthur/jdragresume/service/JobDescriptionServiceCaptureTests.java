@@ -65,6 +65,7 @@ class JobDescriptionServiceCaptureTests {
                 fixedCurrentUser(user),
                 userRepository,
                 SemanticEmbeddingTestSupport.service(),
+                null,
                 200
         );
     }
