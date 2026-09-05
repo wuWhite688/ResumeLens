@@ -146,6 +146,8 @@ class AnalysisHistoryServiceSecurityTests {
     private static final class FixedResumeService extends ResumeService {
         private final Resume resume;
 
+        // 这里只用到 getEntityForCurrentUser()，delete() 永不触发，
+        // 因此新增的 AnalysisHistoryRepository 依赖传 null 即可。
         private FixedResumeService(CurrentUserService currentUserService, Resume resume) {
             super(
                     proxy(ResumeRepository.class, (ignored, method, args) -> null),
@@ -155,7 +157,8 @@ class AnalysisHistoryServiceSecurityTests {
                     null,
                     "unused",
                     null,
-                    SemanticEmbeddingTestSupport.service()
+                    SemanticEmbeddingTestSupport.service(),
+                    null
             );
             this.resume = resume;
         }
@@ -178,6 +181,7 @@ class AnalysisHistoryServiceSecurityTests {
                     currentUserService,
                     proxy(AppUserRepository.class, (ignored, method, args) -> null),
                     SemanticEmbeddingTestSupport.service(),
+                    null,
                     200
             );
             this.jobDescription = jobDescription;

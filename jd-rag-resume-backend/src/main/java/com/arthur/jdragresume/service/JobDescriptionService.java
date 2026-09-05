@@ -7,10 +7,12 @@ import com.arthur.jdragresume.dto.job.JobCaptureResponse;
 import com.arthur.jdragresume.dto.job.JobDescriptionRequest;
 import com.arthur.jdragresume.dto.job.JobDescriptionResponse;
 import com.arthur.jdragresume.dto.job.JobSourceLookupResponse;
+import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
+import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -30,6 +32,7 @@ public class JobDescriptionService {
     private final CurrentUserService currentUserService;
     private final AppUserRepository appUserRepository;
     private final SemanticEmbeddingService semanticEmbeddingService;
+    private final AnalysisHistoryRepository analysisHistoryRepository;
     private final int maxJobDescriptionsPerUser;
 
     public JobDescriptionService(
@@ -37,12 +40,14 @@ public class JobDescriptionService {
             CurrentUserService currentUserService,
             AppUserRepository appUserRepository,
             SemanticEmbeddingService semanticEmbeddingService,
+            AnalysisHistoryRepository analysisHistoryRepository,
             @Value("${app.job-description.max-per-user:200}") int maxJobDescriptionsPerUser
     ) {
         this.jobDescriptionRepository = jobDescriptionRepository;
         this.currentUserService = currentUserService;
         this.appUserRepository = appUserRepository;
         this.semanticEmbeddingService = semanticEmbeddingService;
+        this.analysisHistoryRepository = analysisHistoryRepository;
         this.maxJobDescriptionsPerUser = Math.max(1, maxJobDescriptionsPerUser);
     }
 
@@ -174,6 +179,16 @@ public class JobDescriptionService {
     public void delete(Long id) {
         AppUser user = lockCurrentUser();
         JobDescription jobDescription = getEntityForUser(id, user.getId());
+        // 与 ResumeService.delete() 同理：analysis_history 对 job_description 挂着
+        // ON DELETE CASCADE（V3 迁移），删岗位会连带删掉 PENDING 记录，worker
+        // 却仍在跑，于是「进行中」计数凭空减少。锁用的是与 AnalysisSubmitGuard
+        // 相同的用户行锁，保证检查与删除之间插不进新的提交。
+        if (analysisHistoryRepository.existsByJobDescription_IdAndStatus(id, AnalysisStatus.PENDING)) {
+            throw new BusinessException(
+                    "ANALYSIS_DELETE_PENDING",
+                    "an analysis using this job description is still running, please wait for it to finish"
+            );
+        }
         jobDescriptionRepository.delete(jobDescription);
     }
 

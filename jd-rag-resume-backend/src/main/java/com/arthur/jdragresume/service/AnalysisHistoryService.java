@@ -4,9 +4,11 @@ import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistoryResponse;
 import com.arthur.jdragresume.dto.analysis.AnalysisHistorySummaryResponse;
 import com.arthur.jdragresume.entity.AnalysisHistory;
+import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
+import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -82,6 +84,14 @@ public class AnalysisHistoryService {
     @Transactional
     public void delete(Long id) {
         AnalysisHistory history = getEntityForCurrentUser(id);
+        // 删掉一条还在跑的记录并不会停掉 worker，只会把它从「进行中」计数里抹掉，
+        // 从而绕过并发上限；且事后 worker 回写会落到一条已不存在的记录上。
+        if (history.getStatus() == AnalysisStatus.PENDING) {
+            throw new BusinessException(
+                    "ANALYSIS_DELETE_PENDING",
+                    "analysis is still running, please wait for it to finish before deleting"
+            );
+        }
         analysisHistoryRepository.delete(history);
     }
 

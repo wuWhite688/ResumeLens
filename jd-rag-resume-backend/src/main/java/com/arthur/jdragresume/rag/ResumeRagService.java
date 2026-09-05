@@ -317,8 +317,12 @@ public class ResumeRagService {
         return aliases.stream().anyMatch(alias -> {
             String normalized = alias.toLowerCase(Locale.ROOT);
             if (normalized.chars().allMatch(ch -> ch < 128)) {
+                // ASCII aliases only need ASCII boundaries. Using \p{L} here would treat an
+                // adjacent CJK character as a word character, so "熟悉Java开发" and
+                // "Java后端工程师" — the usual spacing in Chinese resumes and JDs — would
+                // never match, silently dropping required skills and depressing the score.
                 Pattern boundary = Pattern.compile(
-                        "(?<![\\p{L}\\p{N}])" + Pattern.quote(normalized) + "(?![\\p{L}\\p{N}])",
+                        "(?<![A-Za-z0-9])" + Pattern.quote(normalized) + "(?![A-Za-z0-9])",
                         Pattern.CASE_INSENSITIVE
                 );
                 return boundary.matcher(text).find();

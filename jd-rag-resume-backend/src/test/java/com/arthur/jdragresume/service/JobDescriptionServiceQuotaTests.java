@@ -5,6 +5,7 @@ import com.arthur.jdragresume.dto.job.JobDescriptionRequest;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.exception.BusinessException;
+import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.security.CurrentUserService;
@@ -16,6 +17,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -64,6 +66,7 @@ class JobDescriptionServiceQuotaTests {
                 currentUser(user),
                 appUserRepository,
                 SemanticEmbeddingTestSupport.service(),
+                null,
                 MAX_PER_USER
         );
     }
@@ -113,6 +116,56 @@ class JobDescriptionServiceQuotaTests {
                 state.calls.indexOf("findByIdForUpdate") < state.calls.indexOf("countByUserId"),
                 "expected findByIdForUpdate before countByUserId, got " + state.calls
         );
+    }
+
+    @Test
+    void rejectsDeleteWhileAnAnalysisUsingTheJobIsStillPending() {
+        JobDescription job = new JobDescription();
+        job.setUser(user);
+        job.setTitle("Java backend engineer");
+        job.setCompanyName("Acme");
+        job.setDescription("description");
+        ReflectionTestUtils.setField(job, "id", 4L);
+
+        AtomicInteger deletes = new AtomicInteger();
+        JobDescriptionRepository jobDescriptionRepository =
+                proxy(JobDescriptionRepository.class, (ignored, method, args) ->
+                        switch (method.getName()) {
+                            case "findByIdAndUserId" -> Optional.of(job);
+                            case "delete" -> {
+                                deletes.incrementAndGet();
+                                yield null;
+                            }
+                            case "toString" -> "JobDescriptionRepositoryTestDouble";
+                            default -> throw new UnsupportedOperationException(method.getName());
+                        });
+        AppUserRepository appUserRepository = proxy(AppUserRepository.class, (ignored, method, args) ->
+                switch (method.getName()) {
+                    case "findByIdForUpdate" -> Optional.of(user);
+                    case "toString" -> "AppUserRepositoryTestDouble";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        AnalysisHistoryRepository analysisHistoryRepository =
+                proxy(AnalysisHistoryRepository.class, (ignored, method, args) ->
+                        switch (method.getName()) {
+                            case "existsByJobDescription_IdAndStatus" -> true;
+                            case "toString" -> "AnalysisHistoryRepositoryTestDouble";
+                            default -> throw new UnsupportedOperationException(method.getName());
+                        });
+        JobDescriptionService deleteService = new JobDescriptionService(
+                jobDescriptionRepository,
+                currentUser(user),
+                appUserRepository,
+                SemanticEmbeddingTestSupport.service(),
+                analysisHistoryRepository,
+                MAX_PER_USER
+        );
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> deleteService.delete(4L));
+
+        assertEquals("ANALYSIS_DELETE_PENDING", exception.getCode());
+        // 级联删除会连带删掉 PENDING 历史，把“进行中”计数凭空清掉，所以这里必须一行都不删
+        assertEquals(0, deletes.get());
     }
 
     private static JobDescriptionRequest request(String title) {

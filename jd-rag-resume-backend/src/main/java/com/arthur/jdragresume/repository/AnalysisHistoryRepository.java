@@ -74,6 +74,13 @@ public interface AnalysisHistoryRepository extends JpaRepository<AnalysisHistory
 
     long countByUser_IdAndCreatedAtAfter(Long userId, LocalDateTime createdAt);
 
+    // 删除简历 / 岗位会级联删掉它们的分析历史（见 V3 迁移）。若其中有
+    // PENDING，worker 仍在跑，但「进行中」计数会凭空减少，成为并发上限的
+    // 另一个绕过入口，因此删除前需要先查。
+    boolean existsByResume_IdAndStatus(Long resumeId, AnalysisStatus status);
+
+    boolean existsByJobDescription_IdAndStatus(Long jobDescriptionId, AnalysisStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select history from AnalysisHistory history

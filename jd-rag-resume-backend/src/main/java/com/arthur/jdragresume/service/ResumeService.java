@@ -3,11 +3,13 @@ package com.arthur.jdragresume.service;
 import com.arthur.jdragresume.common.PageResponse;
 import com.arthur.jdragresume.dto.resume.ResumeRequest;
 import com.arthur.jdragresume.dto.resume.ResumeResponse;
+import com.arthur.jdragresume.entity.AnalysisStatus;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.ResourceNotFoundException;
 import com.arthur.jdragresume.common.PageRequests;
+import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
 import com.arthur.jdragresume.repository.ResumeChunkRepository;
@@ -42,6 +44,7 @@ public class ResumeService {
     private final Path resumeUploadDir;
     private final LuceneVectorIndex vectorIndex;
     private final SemanticEmbeddingService semanticEmbeddingService;
+    private final AnalysisHistoryRepository analysisHistoryRepository;
     @Value("${app.upload.max-resumes-per-user:30}")
     private int maxResumesPerUser = 30;
     @Value("${app.upload.max-stored-bytes-per-user:209715200}")
@@ -55,7 +58,8 @@ public class ResumeService {
             ResumeTextExtractor resumeTextExtractor,
             @Value("${app.upload.resume-dir:uploads/resumes}") String resumeUploadDir,
             LuceneVectorIndex vectorIndex,
-            SemanticEmbeddingService semanticEmbeddingService
+            SemanticEmbeddingService semanticEmbeddingService,
+            AnalysisHistoryRepository analysisHistoryRepository
     ) {
         this.resumeRepository = resumeRepository;
         this.resumeChunkRepository = resumeChunkRepository;
@@ -65,6 +69,7 @@ public class ResumeService {
         this.resumeUploadDir = Path.of(resumeUploadDir);
         this.vectorIndex = vectorIndex;
         this.semanticEmbeddingService = semanticEmbeddingService;
+        this.analysisHistoryRepository = analysisHistoryRepository;
     }
 
     @Transactional(readOnly = true)
@@ -180,6 +185,16 @@ public class ResumeService {
     public void delete(Long id) {
         AppUser user = lockCurrentUser();
         Resume resume = getEntityForUser(id, user.getId());
+        // analysis_history 对 resume 挂着 ON DELETE CASCADE（V3 迁移）：删掉简历会连带
+        // 删掉 PENDING 记录，而 worker 仍在调用模型，于是「进行中」计数凭空减少，
+            // 用户可以继续提交，绕过并发上限。lockCurrentUser() 与 AnalysisSubmitGuard
+        // 用的是同一把用户行锁，因此「检查」与「删除」之间插不进新的分析。
+        if (analysisHistoryRepository.existsByResume_IdAndStatus(id, AnalysisStatus.PENDING)) {
+            throw new BusinessException(
+                    "ANALYSIS_DELETE_PENDING",
+                    "an analysis using this resume is still running, please wait for it to finish"
+            );
+        }
         Path storedFile = safeStoredFile(resume.getStoredFilePath());
         resumeChunkRepository.deleteByResumeId(id);
         resumeRepository.delete(resume);

@@ -2,11 +2,13 @@ package com.arthur.jdragresume.service;
 
 import com.arthur.jdragresume.entity.AnalysisHistory;
 import com.arthur.jdragresume.entity.AnalysisStatus;
+import com.arthur.jdragresume.entity.AnalysisSubmissionLog;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
+import com.arthur.jdragresume.repository.AnalysisSubmissionLogRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
@@ -20,6 +22,7 @@ import java.time.LocalDateTime;
 @Service
 public class AnalysisSubmitGuard {
     private final AnalysisHistoryRepository analysisHistoryRepository;
+    private final AnalysisSubmissionLogRepository analysisSubmissionLogRepository;
     private final AppUserRepository appUserRepository;
     private final ResumeRepository resumeRepository;
     private final JobDescriptionRepository jobDescriptionRepository;
@@ -29,6 +32,7 @@ public class AnalysisSubmitGuard {
 
     public AnalysisSubmitGuard(
             AnalysisHistoryRepository analysisHistoryRepository,
+            AnalysisSubmissionLogRepository analysisSubmissionLogRepository,
             AppUserRepository appUserRepository,
             ResumeRepository resumeRepository,
             JobDescriptionRepository jobDescriptionRepository,
@@ -37,6 +41,7 @@ public class AnalysisSubmitGuard {
             @Value("${app.analysis.submit-window-minutes:10}") long submitWindowMinutes
     ) {
         this.analysisHistoryRepository = analysisHistoryRepository;
+        this.analysisSubmissionLogRepository = analysisSubmissionLogRepository;
         this.appUserRepository = appUserRepository;
         this.resumeRepository = resumeRepository;
         this.jobDescriptionRepository = jobDescriptionRepository;
@@ -88,14 +93,21 @@ public class AnalysisSubmitGuard {
             );
         }
 
+        // 限流计数取自只追加的 analysis_submission_log，而不是可被用户删除的
+        // analysis_history；否则「删历史 → 重提」就能把窗口内的计数清掉。
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(submitWindowMinutes);
-        long submitted = analysisHistoryRepository.countByUser_IdAndCreatedAtAfter(lockedUser.getId(), cutoff);
+        long submitted = analysisSubmissionLogRepository
+                .countByUser_IdAndCreatedAtAfter(lockedUser.getId(), cutoff);
         if (submitted >= maxSubmitsPerWindow) {
             throw new BusinessException(
                     "ANALYSIS_RATE_LIMITED",
                     "too many analysis requests, please retry later"
             );
         }
+
+        AnalysisSubmissionLog submissionLog = new AnalysisSubmissionLog();
+        submissionLog.setUser(lockedUser);
+        analysisSubmissionLogRepository.save(submissionLog);
 
         AnalysisHistory history = new AnalysisHistory();
         history.setUser(lockedUser);

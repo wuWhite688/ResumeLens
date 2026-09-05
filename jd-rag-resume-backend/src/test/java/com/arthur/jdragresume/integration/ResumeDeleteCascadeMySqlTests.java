@@ -6,6 +6,7 @@ import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.rag.LuceneVectorIndex;
+import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.repository.ResumeChunkRepository;
@@ -111,7 +112,8 @@ class ResumeDeleteCascadeMySqlTests {
                             null,
                             tempDir.resolve("uploads").toString(),
                             vectorIndex,
-                            com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service()
+                            com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service(),
+                            pendingAwareAnalysisHistoryRepository(connection)
                     );
                     MockMvc mockMvc = MockMvcBuilders
                             .standaloneSetup(new ResumeController(resumeService))
@@ -176,6 +178,7 @@ class ResumeDeleteCascadeMySqlTests {
                             );
                         }),
                         com.arthur.jdragresume.service.SemanticEmbeddingTestSupport.service(),
+                        pendingAwareAnalysisHistoryRepository(connection),
                         200
                 );
                 MockMvc mockMvc = MockMvcBuilders
@@ -191,6 +194,27 @@ class ResumeDeleteCascadeMySqlTests {
                 cleanup(connection, rows);
             }
         }
+    }
+
+    /**
+     * 删除路径现在会先查关联的 PENDING 分析，所以这里不能塞 null，也不写死 false：
+     * 替身直接查同一个连接上的真实数据。夹具插入的是 COMPLETED，因此删除放行；
+     * 若将来夹具改成 PENDING，这个替身会如实反映，测试也会如实失败。
+     */
+    private static AnalysisHistoryRepository pendingAwareAnalysisHistoryRepository(Connection connection) {
+        return proxy(
+                AnalysisHistoryRepository.class,
+                (ignored, method, args) -> switch (method.getName()) {
+                    case "existsByResume_IdAndStatus" ->
+                            countPending(connection, "resume_id", (Long) args[0]) > 0;
+                    case "existsByJobDescription_IdAndStatus" ->
+                            countPending(connection, "job_description_id", (Long) args[0]) > 0;
+                    case "toString" -> "AnalysisHistoryRepositoryMySqlTestDouble";
+                    default -> throw new UnsupportedOperationException(
+                            "Unexpected repository call: " + method.getName()
+                    );
+                }
+        );
     }
 
     private DatabaseConfiguration migrateDatabase() {
@@ -279,6 +303,17 @@ class ResumeDeleteCascadeMySqlTests {
 
     private long count(Connection connection, String table, String column, long id) throws Exception {
         String sql = "SELECT COUNT(*) FROM " + table + " WHERE " + column + " = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private static long countPending(Connection connection, String column, long id) throws Exception {
+        String sql = "SELECT COUNT(*) FROM analysis_history WHERE " + column + " = ? AND status = 'PENDING'";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, id);
             try (ResultSet resultSet = statement.executeQuery()) {

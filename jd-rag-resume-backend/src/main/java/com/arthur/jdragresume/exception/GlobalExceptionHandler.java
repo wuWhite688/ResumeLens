@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
@@ -30,7 +31,9 @@ public class GlobalExceptionHandler {
             case "AUTH_RATE_LIMITED", "ANALYSIS_RATE_LIMITED", "ANALYSIS_TOO_MANY_PENDING" -> HttpStatus.TOO_MANY_REQUESTS;
             // ACCOUNT_CONFLICT 必须与 DataIntegrityViolationException 同为 409：
             // 串行注册被应用层查重拦下、并发注册被唯一约束拦下，是同一件事的两条路径。
-            case "ANALYSIS_ALREADY_PENDING", "ACCOUNT_CONFLICT", "SEMANTIC_EMBEDDING_STALE" -> HttpStatus.CONFLICT;
+            // ANALYSIS_DELETE_PENDING 同理：请求本身合法，但与当前资源状态冲突。
+            case "ANALYSIS_ALREADY_PENDING", "ANALYSIS_DELETE_PENDING", "ACCOUNT_CONFLICT",
+                 "SEMANTIC_EMBEDDING_STALE" -> HttpStatus.CONFLICT;
             case "AI_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
             // 队列满是服务端暂时容纳不下，客户端应当稍后重试；落到 400 会与
             // "please retry later" 的提示自相矛盾，也让重试与熔断策略失去依据。
@@ -96,6 +99,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error("DATA_INTEGRITY_ERROR", "data conflicts with existing records or constraints"));
+    }
+
+    // 并发修改同一行（典型场景：语义向量刷新期间用户又编辑了简历/岗位）。
+    // 与 DataIntegrityViolationException 同为 409：都是「请求本身没错，但与当前
+    // 数据状态冲突」，客户端重新拉取后重试即可。
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(
+                        "CONCURRENT_MODIFICATION",
+                        "record was modified by another request, please reload and retry"
+                ));
     }
 
     @ExceptionHandler(Exception.class)

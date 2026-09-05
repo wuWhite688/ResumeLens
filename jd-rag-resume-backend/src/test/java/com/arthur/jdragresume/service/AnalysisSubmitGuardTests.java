@@ -2,11 +2,13 @@ package com.arthur.jdragresume.service;
 
 import com.arthur.jdragresume.entity.AnalysisHistory;
 import com.arthur.jdragresume.entity.AnalysisStatus;
+import com.arthur.jdragresume.entity.AnalysisSubmissionLog;
 import com.arthur.jdragresume.entity.AppUser;
 import com.arthur.jdragresume.entity.JobDescription;
 import com.arthur.jdragresume.entity.Resume;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.repository.AnalysisHistoryRepository;
+import com.arthur.jdragresume.repository.AnalysisSubmissionLogRepository;
 import com.arthur.jdragresume.repository.AppUserRepository;
 import com.arthur.jdragresume.repository.JobDescriptionRepository;
 import com.arthur.jdragresume.repository.ResumeRepository;
@@ -19,6 +21,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -52,7 +56,6 @@ class AnalysisSubmitGuardTests {
                     case "findFirstByUser_IdAndResume_IdAndJobDescription_IdAndStatusAndResumeFingerprintAndJobFingerprintOrderByIdDesc" ->
                             Optional.ofNullable(state.existingPending);
                     case "countByUser_IdAndStatus" -> state.pendingCount;
-                    case "countByUser_IdAndCreatedAtAfter" -> state.submittedCount;
                     case "save" -> {
                         state.saved = (AnalysisHistory) args[0];
                         ReflectionTestUtils.setField(state.saved, "id", 9L);
@@ -61,6 +64,21 @@ class AnalysisSubmitGuardTests {
                     case "toString" -> "AnalysisHistoryRepositoryTestDouble";
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
+        // 限流计数已从 analysis_history 迁到只追加的 analysis_submission_log，
+        // 测试替身必须跟着搬：若仍在历史仓库上模拟计数，用例即使能编译
+        // 也不再覆盖真实的限流路径。
+        AnalysisSubmissionLogRepository submissionLogRepository =
+                proxy(AnalysisSubmissionLogRepository.class, (ignored, method, args) ->
+                        switch (method.getName()) {
+                            case "countByUser_IdAndCreatedAtAfter" -> state.submittedCount;
+                            case "save" -> {
+                                state.savedSubmissionLog = (AnalysisSubmissionLog) args[0];
+                                ReflectionTestUtils.setField(state.savedSubmissionLog, "id", 7L);
+                                yield state.savedSubmissionLog;
+                            }
+                            case "toString" -> "AnalysisSubmissionLogRepositoryTestDouble";
+                            default -> throw new UnsupportedOperationException(method.getName());
+                        });
         AppUserRepository userRepository = proxy(AppUserRepository.class, (ignored, method, args) ->
                 switch (method.getName()) {
                     case "findByIdForUpdate" -> Optional.of(state.user);
@@ -81,6 +99,7 @@ class AnalysisSubmitGuardTests {
                 });
         guard = new AnalysisSubmitGuard(
                 historyRepository,
+                submissionLogRepository,
                 userRepository,
                 resumeRepository,
                 jobDescriptionRepository,
@@ -103,6 +122,14 @@ class AnalysisSubmitGuardTests {
     }
 
     @Test
+    void recordsSubmissionInTheAppendOnlyLog() {
+        guard.admit(user, resume.getId(), job.getId());
+
+        assertNotNull(state.savedSubmissionLog);
+        assertSame(user, state.savedSubmissionLog.getUser());
+    }
+
+    @Test
     void reusesPendingAnalysisForTheSameInputVersion() {
         state.existingPending = new AnalysisHistory();
         ReflectionTestUtils.setField(state.existingPending, "id", 8L);
@@ -111,6 +138,8 @@ class AnalysisSubmitGuardTests {
 
         assertTrue(admission.reusedPending());
         assertSame(state.existingPending, admission.history());
+        // 复用已有 PENDING 不算一次新提交，不应计入限流。
+        assertNull(state.savedSubmissionLog);
     }
 
     @Test
@@ -131,6 +160,8 @@ class AnalysisSubmitGuardTests {
                 () -> guard.admit(user, resume.getId(), job.getId())
         );
         assertEquals("ANALYSIS_RATE_LIMITED", exception.getCode());
+        assertNull(state.saved);
+        assertNull(state.savedSubmissionLog);
     }
 
     @SuppressWarnings("unchecked")
@@ -144,5 +175,6 @@ class AnalysisSubmitGuardTests {
         private long pendingCount;
         private long submittedCount;
         private AnalysisHistory saved;
+        private AnalysisSubmissionLog savedSubmissionLog;
     }
 }
