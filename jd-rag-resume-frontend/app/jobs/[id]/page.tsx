@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AppChrome } from "../../components/AppChrome";
-import { apiRequest, type Job } from "../../lib/api";
+import { apiRequest, visibleApiErrorMessage, type Job } from "../../lib/api";
 
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
@@ -43,7 +43,9 @@ export default function JobDetailPage() {
         requirements: data.requirements || "",
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "加载职位失败");
+      const message = visibleApiErrorMessage(reason, "加载职位失败");
+      if (message == null) return;
+      setError(message);
     } finally {
       setBusy("");
     }
@@ -67,7 +69,9 @@ export default function JobDetailPage() {
       setEditing(false);
       setNotice("职位已更新");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "更新失败");
+      const message = visibleApiErrorMessage(reason, "更新失败");
+      if (message == null) return;
+      setError(message);
     } finally {
       setBusy("");
     }
@@ -81,7 +85,10 @@ export default function JobDetailPage() {
       await apiRequest<void>(`/api/job-descriptions/${id}`, { method: "DELETE" });
       router.replace("/");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除失败");
+      const message = visibleApiErrorMessage(reason, "删除失败");
+      if (message == null) return;
+      setError(message);
+    } finally {
       setBusy("");
     }
   }

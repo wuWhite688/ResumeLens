@@ -7,9 +7,12 @@ import {
   apiRequest,
   clearAuthSession,
   getAuthSessionId,
+  isAuthSessionChangedError,
+  isAuthSessionCurrent,
   logoutSession,
   refreshSession,
   setAccessToken,
+  visibleApiErrorMessage,
 } from "../app/lib/api.ts";
 import {
   POST as proxyPost,
@@ -436,4 +439,30 @@ test("concurrent 401s sharing one failed refresh both report expiry", async () =
   }
   assert.equal(refreshCalls, 1);
   assert.equal(expiredEvents, 2);
+});
+
+test("AUTH_SESSION_CHANGED is a silent cancel, not toast copy", () => {
+  const cancelled = new ApiError(AUTH_SESSION_CHANGED_CODE, "登录状态已变更，原请求已作废", 401);
+  assert.equal(isAuthSessionChangedError(cancelled), true);
+  assert.equal(visibleApiErrorMessage(cancelled, "无法连接后端"), null);
+
+  const unauthorizedError = new ApiError("UNAUTHORIZED", "请先登录", 401);
+  assert.equal(isAuthSessionChangedError(unauthorizedError), false);
+  assert.equal(visibleApiErrorMessage(unauthorizedError, "无法连接后端"), "请先登录");
+  assert.equal(visibleApiErrorMessage(new Error("timeout"), "无法连接后端"), "timeout");
+  assert.equal(visibleApiErrorMessage("boom", "无法连接后端"), "无法连接后端");
+});
+
+test("workspace load must not commit after the captured login session changes", () => {
+  setAccessToken("account-A-token");
+  const captured = getAuthSessionId();
+  assert.equal(isAuthSessionCurrent(captured), true);
+
+  clearAuthSession();
+  setAccessToken("account-B-token");
+
+  assert.equal(isAuthSessionCurrent(captured), false);
+  assert.notEqual(getAuthSessionId(), captured);
+  // The current session is healthy; only the abandoned load is discarded.
+  assert.equal(isAuthSessionCurrent(getAuthSessionId()), true);
 });

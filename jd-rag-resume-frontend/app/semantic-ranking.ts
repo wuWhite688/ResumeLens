@@ -3,6 +3,8 @@ import type { AnalysisSummary, ApiError, JobSemanticMatch } from "./lib/api";
 export const DEFAULT_JOB_SORT = "semantic" as const;
 const STALE_EMBEDDING_CODE = "SEMANTIC_EMBEDDING_STALE";
 
+export type SemanticLoadStatus = "idle" | "loading" | "ready" | "error";
+
 type ApiRequester = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 /**
@@ -30,6 +32,34 @@ function hasApiErrorCode(reason: unknown, code: string): reason is ApiError {
   return reason instanceof Error
     && "code" in reason
     && (reason as { code?: unknown }).code === code;
+}
+
+/**
+ * Effect auto-fetch for vector coarse ranking.
+ *
+ * After a resume's ranking has failed, keep `error` and do not let the effect
+ * retry on its own — the retry button calls `loadSemanticMatches` directly.
+ * `loading` is also skipped so a manual retry (which clears resumeId at start)
+ * cannot stack a second request on top of itself.
+ */
+export function shouldAutoLoadSemanticMatches(input: {
+  hasToken: boolean;
+  selectedResumeId: number | "";
+  jobSort: string;
+  jobSemanticResumeId: number | null;
+  jobSemanticStatus: SemanticLoadStatus;
+}): boolean {
+  if (!input.hasToken || !input.selectedResumeId || input.jobSort !== DEFAULT_JOB_SORT) {
+    return false;
+  }
+  if (input.jobSemanticStatus === "loading") return false;
+  if (
+    input.jobSemanticResumeId === input.selectedResumeId
+    && input.jobSemanticStatus !== "idle"
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AppChrome } from "../../components/AppChrome";
-import { apiRequest, type Resume } from "../../lib/api";
+import { apiRequest, visibleApiErrorMessage, type Resume } from "../../lib/api";
 
 export default function ResumeDetailPage() {
   const params = useParams<{ id: string }>();
@@ -41,7 +41,9 @@ export default function ResumeDetailPage() {
         rawText: data.rawText || "",
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "加载简历失败");
+      const message = visibleApiErrorMessage(reason, "加载简历失败");
+      if (message == null) return;
+      setError(message);
     } finally {
       setBusy("");
     }
@@ -65,7 +67,9 @@ export default function ResumeDetailPage() {
       setEditing(false);
       setNotice("简历已更新，下次匹配会重建向量索引");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "更新失败");
+      const message = visibleApiErrorMessage(reason, "更新失败");
+      if (message == null) return;
+      setError(message);
     } finally {
       setBusy("");
     }
@@ -79,7 +83,10 @@ export default function ResumeDetailPage() {
       await apiRequest<void>(`/api/resumes/${id}`, { method: "DELETE" });
       router.replace("/");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除失败");
+      const message = visibleApiErrorMessage(reason, "删除失败");
+      if (message == null) return;
+      setError(message);
+    } finally {
       setBusy("");
     }
   }
