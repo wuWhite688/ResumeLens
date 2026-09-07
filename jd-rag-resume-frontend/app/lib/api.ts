@@ -267,7 +267,9 @@ export async function apiRequest<T>(
           response.status,
         );
       }
-      ownedSessionId = authSessionId;
+      // MUTATION UNDER TEST — do not merge. Reintroduces the pre-refresh
+      // snapshot so notifyAuthExpired() compares N against N+1 again.
+      ownedSessionId = requestAuthSessionId;
       if (session) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
