@@ -91,6 +91,8 @@ export type AuthResponse = {
 
 export const API_PREFIX = "/api/backend";
 export const AUTH_EXPIRED_EVENT = "jd-rag-auth-expired";
+/** Raised when a request outlived the login session it was issued under. */
+export const AUTH_SESSION_CHANGED_CODE = "AUTH_SESSION_CHANGED";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -109,20 +111,52 @@ type ApiRequestOptions = {
   retryAuth?: boolean;
 };
 
+type SetAccessTokenOptions = {
+  /**
+   * True only for token rotation inside an already established login session
+   * (refresh). Logging in is a new session and must leave this false.
+   */
+  continuesSession?: boolean;
+};
+
 let accessToken = "";
 let refreshPromise: Promise<AuthResponse | null> | null = null;
 let refreshGeneration = -1;
 let logoutPromise: Promise<void> | null = null;
 let authGeneration = 0;
+/**
+ * Identifies the current login session. Unlike authGeneration it does NOT
+ * advance on refresh rotation, so callers can distinguish "same user, newer
+ * token" from "different user is now logged in".
+ */
+let authSessionId = 0;
+/**
+ * Counts the session clears caused by our own refresh failure. A failed
+ * refresh ends the session legitimately, so apiRequest must not mistake the
+ * resulting authSessionId bump for "another account logged in".
+ */
+let refreshFailureClears = 0;
 
-export function setAccessToken(nextToken: string) {
+/** Snapshot of the current login session; compare after awaiting to detect switches. */
+export function getAuthSessionId(): number {
+  return authSessionId;
+}
+
+/** True when the login session is still the one the caller captured earlier. */
+export function isAuthSessionCurrent(sessionId: number): boolean {
+  return sessionId === authSessionId;
+}
+
+export function setAccessToken(nextToken: string, options: SetAccessTokenOptions = {}) {
   authGeneration += 1;
+  if (!options.continuesSession) authSessionId += 1;
   accessToken = nextToken;
   removeLegacyAuthStorage();
 }
 
 export function clearAuthSession() {
   authGeneration += 1;
+  authSessionId += 1;
   accessToken = "";
   removeLegacyAuthStorage();
 }
@@ -140,11 +174,16 @@ export async function refreshSession(): Promise<AuthResponse | null> {
   refreshPromise = requestRefreshWithBrowserLock()
     .then((session) => {
       if (generation !== authGeneration) return null;
-      setAccessToken(session.accessToken);
+      // Rotation within the same login session: keep authSessionId stable so
+      // in-flight requests issued before the refresh remain retryable.
+      setAccessToken(session.accessToken, { continuesSession: true });
       return session;
     })
     .catch(() => {
-      if (generation === authGeneration) clearAuthSession();
+      if (generation === authGeneration) {
+        refreshFailureClears += 1;
+        clearAuthSession();
+      }
       return null;
     })
     .finally(() => {
@@ -182,6 +221,9 @@ export async function apiRequest<T>(
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   const requestAccessToken = accessToken;
+  // Captured together with the token: a 401 is only ever retried while this
+  // still matches, so a stale request can never borrow another account's token.
+  const requestAuthSessionId = authSessionId;
   if (options.auth !== false && requestAccessToken) {
     headers.set("Authorization", `Bearer ${requestAccessToken}`);
   }
@@ -195,16 +237,42 @@ export async function apiRequest<T>(
     });
   const response = startsExplicitSession ? await requestWithBrowserAuthLock(send) : await send();
   if (response.status === 401 && options.auth !== false) {
+    if (requestAuthSessionId !== authSessionId) {
+      // The session that issued this request is gone. Drop it without retrying
+      // and without notifyAuthExpired(), which would sign out the new session.
+      throw new ApiError(
+        AUTH_SESSION_CHANGED_CODE,
+        "登录状态已变更，原请求已作废",
+        response.status,
+      );
+    }
+    // The session this request still counts as its own. A failed refresh ends
+    // that session legitimately and bumps authSessionId, so the id we accept
+    // has to absorb that bump; every later check uses this value, never the
+    // raw snapshot, or the compensation gets applied in one place and skipped
+    // in another.
+    let ownedSessionId = requestAuthSessionId;
     if (options.retryAuth !== false) {
       if (requestAccessToken && requestAccessToken !== accessToken) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
+      const clearsBeforeRefresh = refreshFailureClears;
       const session = await refreshSession();
+      const selfInflictedBumps = refreshFailureClears - clearsBeforeRefresh;
+      const sessionIsOurs = authSessionId === requestAuthSessionId + selfInflictedBumps;
+      if (!sessionIsOurs) {
+        throw new ApiError(
+          AUTH_SESSION_CHANGED_CODE,
+          "登录状态已变更，原请求已作废",
+          response.status,
+        );
+      }
+      ownedSessionId = authSessionId;
       if (session) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
     }
-    notifyAuthExpired();
+    notifyAuthExpired(ownedSessionId);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -260,8 +328,21 @@ async function requestLogoutWithBrowserLock(): Promise<void> {
   await request();
 }
 
-function notifyAuthExpired() {
-  clearAuthSession();
+/**
+ * @param expectedSessionId the session the caller was serving, after absorbing
+ * any bump a failed refresh caused. Omit for callers not tied to one request.
+ */
+function notifyAuthExpired(expectedSessionId?: number) {
+  if (expectedSessionId !== undefined && expectedSessionId !== authSessionId) {
+    // A late 401 belonging to an abandoned session must never sign out the
+    // session that is live now, nor tell the page to drop it.
+    return;
+  }
+  // Clearing is idempotent: an already-empty session is not cleared again, so
+  // concurrent 401s sharing one failed refresh do not each advance the ids and
+  // make later ones look like an account switch. The event still fires for
+  // every caller, since it is only a notification.
+  if (accessToken) clearAuthSession();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
