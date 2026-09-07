@@ -246,20 +246,20 @@ export async function apiRequest<T>(
         response.status,
       );
     }
+    // The session this request still counts as its own. A failed refresh ends
+    // that session legitimately and bumps authSessionId, so the id we accept
+    // has to absorb that bump; every later check uses this value, never the
+    // raw snapshot, or the compensation gets applied in one place and skipped
+    // in another.
+    let ownedSessionId = requestAuthSessionId;
     if (options.retryAuth !== false) {
       if (requestAccessToken && requestAccessToken !== accessToken) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
       const clearsBeforeRefresh = refreshFailureClears;
       const session = await refreshSession();
-      // A failed refresh clears the session itself and bumps authSessionId.
-      // Discount that self-inflicted bump, otherwise an expired refresh token
-      // looks like an account switch and never reaches notifyAuthExpired().
       const selfInflictedBumps = refreshFailureClears - clearsBeforeRefresh;
       const sessionIsOurs = authSessionId === requestAuthSessionId + selfInflictedBumps;
-      if (session && sessionIsOurs) {
-        return apiRequest<T>(path, init, { ...options, retryAuth: false });
-      }
       if (!sessionIsOurs) {
         throw new ApiError(
           AUTH_SESSION_CHANGED_CODE,
@@ -267,8 +267,12 @@ export async function apiRequest<T>(
           response.status,
         );
       }
+      ownedSessionId = authSessionId;
+      if (session) {
+        return apiRequest<T>(path, init, { ...options, retryAuth: false });
+      }
     }
-    notifyAuthExpired(requestAuthSessionId);
+    notifyAuthExpired(ownedSessionId);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -325,8 +329,8 @@ async function requestLogoutWithBrowserLock(): Promise<void> {
 }
 
 /**
- * @param expectedSessionId session the caller was serving; omit for callers
- * that are not tied to one particular request.
+ * @param expectedSessionId the session the caller was serving, after absorbing
+ * any bump a failed refresh caused. Omit for callers not tied to one request.
  */
 function notifyAuthExpired(expectedSessionId?: number) {
   if (expectedSessionId !== undefined && expectedSessionId !== authSessionId) {
