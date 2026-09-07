@@ -268,7 +268,7 @@ export async function apiRequest<T>(
         );
       }
     }
-    notifyAuthExpired();
+    notifyAuthExpired(requestAuthSessionId);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -324,8 +324,21 @@ async function requestLogoutWithBrowserLock(): Promise<void> {
   await request();
 }
 
-function notifyAuthExpired() {
-  clearAuthSession();
+/**
+ * @param expectedSessionId session the caller was serving; omit for callers
+ * that are not tied to one particular request.
+ */
+function notifyAuthExpired(expectedSessionId?: number) {
+  if (expectedSessionId !== undefined && expectedSessionId !== authSessionId) {
+    // A late 401 belonging to an abandoned session must never sign out the
+    // session that is live now, nor tell the page to drop it.
+    return;
+  }
+  // Clearing is idempotent: an already-empty session is not cleared again, so
+  // concurrent 401s sharing one failed refresh do not each advance the ids and
+  // make later ones look like an account switch. The event still fires for
+  // every caller, since it is only a notification.
+  if (accessToken) clearAuthSession();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
