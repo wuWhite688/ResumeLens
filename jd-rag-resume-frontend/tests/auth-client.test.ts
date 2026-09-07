@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ApiError,
+  AUTH_EXPIRED_EVENT,
+  AUTH_SESSION_CHANGED_CODE,
   apiRequest,
   clearAuthSession,
+  getAuthSessionId,
   logoutSession,
   refreshSession,
   setAccessToken,
@@ -20,6 +23,11 @@ const session = {
   expiresInSeconds: 900,
   user: { id: 1, username: "arthur", displayName: "Arthur", email: "arthur@example.com" },
 };
+
+const unauthorized = () => Response.json(
+  { success: false, code: "UNAUTHORIZED", message: "expired", data: null },
+  { status: 401 },
+);
 
 test.afterEach(() => {
   clearAuthSession();
@@ -243,4 +251,189 @@ test("the backend proxy adds Secure on HTTPS but leaves local HTTP cookies intac
   const httpsCookie = rewriteUpstreamCookie(cookie, new URL("https://example.com/api/backend/api/auth/login"));
   assert.equal(httpCookie.includes("Secure"), false);
   assert.match(httpsCookie, /;\s*Secure/);
+});
+
+/*
+ * Session isolation across account switches.
+ *
+ * These pin down side effects, not just which error surfaces: the number of
+ * fetch calls, which Authorization each one carried, whether /api/auth/refresh
+ * was reached at all, and whether AUTH_EXPIRED_EVENT actually fired. Asserting
+ * only on the thrown code would still pass if the guarded branch were never
+ * entered, which is exactly how two regressions slipped through review here.
+ */
+
+type MutableGlobal = Record<string, unknown>;
+
+const savedGlobals: { window?: unknown; localStorage?: unknown } = {};
+
+/**
+ * api.ts only dispatches AUTH_EXPIRED_EVENT when `window` exists, and its
+ * legacy-storage cleanup then reaches for `localStorage`, so the two have to be
+ * installed and removed together.
+ */
+function installBrowserGlobals(): EventTarget {
+  const mutable = globalThis as unknown as MutableGlobal;
+  savedGlobals.window = mutable.window;
+  savedGlobals.localStorage = mutable.localStorage;
+  const target = new EventTarget();
+  mutable.window = target;
+  mutable.localStorage = { removeItem() {} };
+  return target;
+}
+
+function restoreBrowserGlobals() {
+  const mutable = globalThis as unknown as MutableGlobal;
+  if (savedGlobals.window === undefined) delete mutable.window;
+  else mutable.window = savedGlobals.window;
+  if (savedGlobals.localStorage === undefined) delete mutable.localStorage;
+  else mutable.localStorage = savedGlobals.localStorage;
+  savedGlobals.window = undefined;
+  savedGlobals.localStorage = undefined;
+}
+
+// Registered after the file's existing afterEach, so clearAuthSession() still
+// runs while the stubs are in place.
+test.afterEach(restoreBrowserGlobals);
+
+test("a 401 from an abandoned session never replays with the next account's token", async () => {
+  installBrowserGlobals();
+  setAccessToken("account-A-token");
+  const calls: Array<{ url: string; authorization: string | null; body: unknown }> = [];
+  let releaseA!: (response: Response) => void;
+
+  globalThis.fetch = async (input, init) => {
+    calls.push({
+      url: String(input),
+      authorization: new Headers(init?.headers).get("Authorization"),
+      body: init?.body,
+    });
+    if (calls.length === 1) {
+      return new Promise<Response>((resolve) => {
+        releaseA = resolve;
+      });
+    }
+    return Response.json({ success: true, code: "OK", message: "success", data: { ok: true } });
+  };
+
+  const staleWrite = apiRequest("/api/resumes", {
+    method: "POST",
+    body: JSON.stringify({ rawText: "PRIVATE_RESUME_FROM_A" }),
+  });
+
+  clearAuthSession();
+  setAccessToken("account-B-token");
+  releaseA(unauthorized());
+
+  await assert.rejects(
+    () => staleWrite,
+    (reason) => reason instanceof ApiError && reason.code === AUTH_SESSION_CHANGED_CODE,
+  );
+
+  // No replay at all: A's body must never leave again, least of all as B.
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].authorization, "Bearer account-A-token");
+
+  // B is untouched and still usable.
+  await apiRequest<{ ok: boolean }>("/api/protected");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].authorization, "Bearer account-B-token");
+});
+
+test("a failed refresh reports an expired session rather than an account switch", async () => {
+  const browserWindow = installBrowserGlobals();
+  const expiredEvents: string[] = [];
+  browserWindow.addEventListener(AUTH_EXPIRED_EVENT, () => expiredEvents.push(AUTH_EXPIRED_EVENT));
+  setAccessToken("expired-access-token");
+  const calls: string[] = [];
+
+  globalThis.fetch = async (input) => {
+    calls.push(String(input));
+    return unauthorized();
+  };
+
+  await assert.rejects(
+    () => apiRequest("/api/protected"),
+    (reason) => reason instanceof ApiError
+      && reason.code === "UNAUTHORIZED"
+      && reason.code !== AUTH_SESSION_CHANGED_CODE,
+  );
+
+  assert.deepEqual(calls, [
+    "/api/backend/api/protected",
+    "/api/backend/api/auth/refresh",
+  ]);
+  // The page clears its workspace on this event; losing it leaves a half
+  // signed-out UI holding the previous user's data.
+  assert.deepEqual(expiredEvents, [AUTH_EXPIRED_EVENT]);
+});
+
+test("a rejected login never triggers a refresh or moves the session", async () => {
+  installBrowserGlobals();
+  const sessionIdBefore = getAuthSessionId();
+  const calls: string[] = [];
+
+  globalThis.fetch = async (input) => {
+    calls.push(String(input));
+    return Response.json(
+      { success: false, code: "BAD_CREDENTIALS", message: "用户名或密码错误", data: null },
+      { status: 401 },
+    );
+  };
+
+  await assert.rejects(
+    () => apiRequest(
+      "/api/auth/login",
+      { method: "POST", body: JSON.stringify({ username: "arthur", password: "wrong" }) },
+      { auth: false },
+    ),
+    (reason) => reason instanceof ApiError
+      && reason.code === "BAD_CREDENTIALS"
+      && reason.status === 401,
+  );
+
+  assert.deepEqual(calls, ["/api/backend/api/auth/login"]);
+  assert.equal(getAuthSessionId(), sessionIdBefore);
+});
+
+test("concurrent 401s sharing one failed refresh both report expiry", async () => {
+  const browserWindow = installBrowserGlobals();
+  let expiredEvents = 0;
+  browserWindow.addEventListener(AUTH_EXPIRED_EVENT, () => {
+    expiredEvents += 1;
+  });
+  setAccessToken("expired-access-token");
+  let refreshCalls = 0;
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+
+  globalThis.fetch = async (input) => {
+    if (String(input).endsWith("/api/auth/refresh")) {
+      refreshCalls += 1;
+      await refreshGate;
+      return unauthorized();
+    }
+    return unauthorized();
+  };
+
+  const first = apiRequest("/api/resumes");
+  const second = apiRequest("/api/job-descriptions");
+  // Drain the microtask queue so both requests are parked on the shared
+  // refresh before it settles.
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseRefresh();
+
+  const outcomes = await Promise.allSettled([first, second]);
+  for (const outcome of outcomes) {
+    assert.equal(outcome.status, "rejected");
+    const reason = (outcome as PromiseRejectedResult).reason;
+    assert.ok(reason instanceof ApiError);
+    // The second request must not be misread as an account switch just
+    // because the first one already cleaned the session up.
+    assert.equal(reason.code, "UNAUTHORIZED");
+  }
+  assert.equal(refreshCalls, 1);
+  assert.equal(expiredEvents, 2);
 });
