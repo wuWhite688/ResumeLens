@@ -91,6 +91,8 @@ export type AuthResponse = {
 
 export const API_PREFIX = "/api/backend";
 export const AUTH_EXPIRED_EVENT = "jd-rag-auth-expired";
+/** Raised when a request outlived the login session it was issued under. */
+export const AUTH_SESSION_CHANGED_CODE = "AUTH_SESSION_CHANGED";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -109,20 +111,46 @@ type ApiRequestOptions = {
   retryAuth?: boolean;
 };
 
+type SetAccessTokenOptions = {
+  /**
+   * True only for token rotation inside an already established login session
+   * (refresh). Logging in is a new session and must leave this false.
+   */
+  continuesSession?: boolean;
+};
+
 let accessToken = "";
 let refreshPromise: Promise<AuthResponse | null> | null = null;
 let refreshGeneration = -1;
 let logoutPromise: Promise<void> | null = null;
 let authGeneration = 0;
+/**
+ * Identifies the current login session. Unlike authGeneration it does NOT
+ * advance on refresh rotation, so callers can distinguish "same user, newer
+ * token" from "different user is now logged in".
+ */
+let authSessionId = 0;
 
-export function setAccessToken(nextToken: string) {
+/** Snapshot of the current login session; compare after awaiting to detect switches. */
+export function getAuthSessionId(): number {
+  return authSessionId;
+}
+
+/** True when the login session is still the one the caller captured earlier. */
+export function isAuthSessionCurrent(sessionId: number): boolean {
+  return sessionId === authSessionId;
+}
+
+export function setAccessToken(nextToken: string, options: SetAccessTokenOptions = {}) {
   authGeneration += 1;
+  if (!options.continuesSession) authSessionId += 1;
   accessToken = nextToken;
   removeLegacyAuthStorage();
 }
 
 export function clearAuthSession() {
   authGeneration += 1;
+  authSessionId += 1;
   accessToken = "";
   removeLegacyAuthStorage();
 }
@@ -140,7 +168,9 @@ export async function refreshSession(): Promise<AuthResponse | null> {
   refreshPromise = requestRefreshWithBrowserLock()
     .then((session) => {
       if (generation !== authGeneration) return null;
-      setAccessToken(session.accessToken);
+      // Rotation within the same login session: keep authSessionId stable so
+      // in-flight requests issued before the refresh remain retryable.
+      setAccessToken(session.accessToken, { continuesSession: true });
       return session;
     })
     .catch(() => {
@@ -182,6 +212,9 @@ export async function apiRequest<T>(
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   const requestAccessToken = accessToken;
+  // Captured together with the token: a 401 is only ever retried while this
+  // still matches, so a stale request can never borrow another account's token.
+  const requestAuthSessionId = authSessionId;
   if (options.auth !== false && requestAccessToken) {
     headers.set("Authorization", `Bearer ${requestAccessToken}`);
   }
@@ -195,13 +228,30 @@ export async function apiRequest<T>(
     });
   const response = startsExplicitSession ? await requestWithBrowserAuthLock(send) : await send();
   if (response.status === 401 && options.auth !== false) {
+    if (!startsExplicitSession && requestAuthSessionId !== authSessionId) {
+      // The session that issued this request is gone. Drop it without retrying
+      // and without notifyAuthExpired(), which would sign out the new session.
+      throw new ApiError(
+        AUTH_SESSION_CHANGED_CODE,
+        "登录状态已变更，原请求已作废",
+        response.status,
+      );
+    }
     if (options.retryAuth !== false) {
       if (requestAccessToken && requestAccessToken !== accessToken) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
       const session = await refreshSession();
-      if (session) {
+      // refreshSession() awaits the network, so re-check before replaying.
+      if (session && requestAuthSessionId === authSessionId) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
+      }
+      if (requestAuthSessionId !== authSessionId) {
+        throw new ApiError(
+          AUTH_SESSION_CHANGED_CODE,
+          "登录状态已变更，原请求已作废",
+          response.status,
+        );
       }
     }
     notifyAuthExpired();
@@ -340,14 +390,6 @@ export const SAMPLE_BULK_JOBS: JobDraft[] = [
     location: "杭州",
     employmentType: "全职",
     description: "负责招聘业务后端服务开发与维护，参与接口设计与性能优化。",
-    requirements: "Java、Spring Boot、MySQL；了解 JWT 与 REST。",
-  },
-  {
-    title: "RAG 应用工程师",
-    companyName: "示例智能",
-    location: "远程",
-    employmentType: "全职",
-    description: "建设企业内部知识库 RAG 链路，完成分块、检索与生成式问答。",
     requirements: "Embedding、向量检索、Python 或 Java；加分 LLM 对接经验。",
   },
 ];
