@@ -130,6 +130,12 @@ let authGeneration = 0;
  * token" from "different user is now logged in".
  */
 let authSessionId = 0;
+/**
+ * Counts the session clears caused by our own refresh failure. A failed
+ * refresh ends the session legitimately, so apiRequest must not mistake the
+ * resulting authSessionId bump for "another account logged in".
+ */
+let refreshFailureClears = 0;
 
 /** Snapshot of the current login session; compare after awaiting to detect switches. */
 export function getAuthSessionId(): number {
@@ -174,7 +180,10 @@ export async function refreshSession(): Promise<AuthResponse | null> {
       return session;
     })
     .catch(() => {
-      if (generation === authGeneration) clearAuthSession();
+      if (generation === authGeneration) {
+        refreshFailureClears += 1;
+        clearAuthSession();
+      }
       return null;
     })
     .finally(() => {
@@ -228,7 +237,7 @@ export async function apiRequest<T>(
     });
   const response = startsExplicitSession ? await requestWithBrowserAuthLock(send) : await send();
   if (response.status === 401 && options.auth !== false) {
-    if (!startsExplicitSession && requestAuthSessionId !== authSessionId) {
+    if (requestAuthSessionId !== authSessionId) {
       // The session that issued this request is gone. Drop it without retrying
       // and without notifyAuthExpired(), which would sign out the new session.
       throw new ApiError(
@@ -241,12 +250,17 @@ export async function apiRequest<T>(
       if (requestAccessToken && requestAccessToken !== accessToken) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
+      const clearsBeforeRefresh = refreshFailureClears;
       const session = await refreshSession();
-      // refreshSession() awaits the network, so re-check before replaying.
-      if (session && requestAuthSessionId === authSessionId) {
+      // A failed refresh clears the session itself and bumps authSessionId.
+      // Discount that self-inflicted bump, otherwise an expired refresh token
+      // looks like an account switch and never reaches notifyAuthExpired().
+      const selfInflictedBumps = refreshFailureClears - clearsBeforeRefresh;
+      const sessionIsOurs = authSessionId === requestAuthSessionId + selfInflictedBumps;
+      if (session && sessionIsOurs) {
         return apiRequest<T>(path, init, { ...options, retryAuth: false });
       }
-      if (requestAuthSessionId !== authSessionId) {
+      if (!sessionIsOurs) {
         throw new ApiError(
           AUTH_SESSION_CHANGED_CODE,
           "登录状态已变更，原请求已作废",
