@@ -390,6 +390,14 @@ export const SAMPLE_BULK_JOBS: JobDraft[] = [
     location: "杭州",
     employmentType: "全职",
     description: "负责招聘业务后端服务开发与维护，参与接口设计与性能优化。",
+    requirements: "Java、Spring Boot、MySQL；了解 JWT 与 REST。",
+  },
+  {
+    title: "RAG 应用工程师",
+    companyName: "示例智能",
+    location: "远程",
+    employmentType: "全职",
+    description: "建设企业内部知识库 RAG 链路，完成分块、检索与生成式问答。",
     requirements: "Embedding、向量检索、Python 或 Java；加分 LLM 对接经验。",
   },
 ];
