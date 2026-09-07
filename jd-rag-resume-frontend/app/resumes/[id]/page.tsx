@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AppChrome } from "../../components/AppChrome";
-import { apiRequest, runDetailDelete, visibleApiErrorMessage, type Resume } from "../../lib/api";
+import { apiRequest, visibleApiErrorMessage, type Resume } from "../../lib/api";
 
 export default function ResumeDetailPage() {
   const params = useParams<{ id: string }>();
@@ -77,12 +77,18 @@ export default function ResumeDetailPage() {
 
   async function remove() {
     if (!window.confirm(`确认删除简历 #${id}？将清理上传文件与向量索引。`)) return;
-    await runDetailDelete({
-      request: () => apiRequest<void>(`/api/resumes/${id}`, { method: "DELETE" }),
-      setBusy,
-      setError,
-      onDeleted: () => router.replace("/"),
-    });
+    setBusy("delete");
+    setError("");
+    try {
+      await apiRequest<void>(`/api/resumes/${id}`, { method: "DELETE" });
+      router.replace("/");
+    } catch (reason) {
+      const message = visibleApiErrorMessage(reason, "删除失败");
+      if (message == null) return;
+      setError(message);
+    } finally {
+      setBusy("");
+    }
   }
 
   return (
