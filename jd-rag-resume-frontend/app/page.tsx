@@ -17,10 +17,13 @@ import {
   type Resume,
   type User,
   apiRequest,
+  getAuthSessionId,
+  isAuthSessionCurrent,
   logoutSession,
   parseJobImportPayload,
   refreshSession,
   setAccessToken,
+  visibleApiErrorMessage,
 } from "./lib/api";
 import {
   PREVIEW_STRENGTHS,
@@ -48,6 +51,7 @@ import {
   DEFAULT_JOB_SORT,
   requestSemanticMatches,
   semanticAnalysisTargets,
+  shouldAutoLoadSemanticMatches,
 } from "./semantic-ranking";
 
 const EMPTY_RESUME_FORM = {
@@ -241,6 +245,12 @@ export default function Home() {
   const jobSemanticRequestGeneration = useRef(0);
   const [fetchedRequirements, setFetchedRequirements] = useState<{ jobId: number; text: string } | null>(null);
 
+  function reportRequestError(reason: unknown, fallback: string) {
+    const message = visibleApiErrorMessage(reason, fallback);
+    if (message == null) return;
+    setError(message);
+  }
+
   const chooseResume = useCallback((next: number | "") => {
     const run = activeAnalysisRun.current;
     if (run && run.resumeId !== next) activeAnalysisRun.current = null;
@@ -300,6 +310,7 @@ export default function Home() {
     setBulkImportText(JSON.stringify(SAMPLE_BULK_JOBS, null, 2));
     setShowBulkImport(false);
     setNotice("");
+    setBusy("");
   }
 
   function invalidateSemanticMatches() {
@@ -346,6 +357,7 @@ export default function Home() {
   }
 
   const loadWorkspace = useCallback(async () => {
+    const sessionId = getAuthSessionId();
     setBusy("loading");
     setError("");
     try {
@@ -354,6 +366,7 @@ export default function Home() {
         apiRequest<PageData<Job>>(`/api/job-descriptions?page=0&size=${JOB_PAGE_SIZE}`),
         apiRequest<PageData<Analysis>>(`/api/analysis-histories?page=0&size=${HISTORY_PAGE_SIZE}`),
       ]);
+      if (!isAuthSessionCurrent(sessionId)) return;
       setResumes(resumePage.content);
       setJobs(jobPage.content);
       setJobsTotal(jobPage.totalElements);
@@ -370,9 +383,10 @@ export default function Home() {
       if (!selectedJobId && jobPage.content[0]) chooseJob(jobPage.content[0].id);
       if (!analysis && historyPage.content[0]?.status === "COMPLETED") setAnalysis(historyPage.content[0]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法连接后端");
+      if (!isAuthSessionCurrent(sessionId)) return;
+      reportRequestError(reason, "无法连接后端");
     } finally {
-      setBusy("");
+      if (isAuthSessionCurrent(sessionId)) setBusy("");
     }
   }, [analysis, chooseJob, chooseResume, selectedJobId, selectedResumeId]);
 
@@ -394,7 +408,8 @@ export default function Home() {
       setJobAnalysesStatus("ready");
     } catch (reason) {
       if (generation !== jobAnalysesRequestGeneration.current) return;
-      const message = reason instanceof Error ? reason.message : "无法读取职位匹配分";
+      const message = visibleApiErrorMessage(reason, "无法读取职位匹配分");
+      if (message == null) return;
       setJobAnalysesResumeId(resumeId);
       setJobAnalysesStatus("error");
       setJobAnalysesError(message);
@@ -421,7 +436,8 @@ export default function Home() {
       return items;
     } catch (reason) {
       if (generation !== jobSemanticRequestGeneration.current) return null;
-      const message = reason instanceof Error ? reason.message : "无法完成职位向量粗排";
+      const message = visibleApiErrorMessage(reason, "无法完成职位向量粗排");
+      if (message == null) return null;
       setJobSemanticResumeId(resumeId);
       setJobSemanticStatus("error");
       setJobSemanticError(message);
@@ -437,9 +453,13 @@ export default function Home() {
   }, [loadJobAnalyses, selectedResumeId, token]);
 
   useEffect(() => {
-    if (!token || !selectedResumeId || jobSort !== "semantic") return;
-    if (jobSemanticResumeId === selectedResumeId
-        && (jobSemanticStatus === "loading" || jobSemanticStatus === "ready")) return;
+    if (!shouldAutoLoadSemanticMatches({
+      hasToken: Boolean(token),
+      selectedResumeId,
+      jobSort,
+      jobSemanticResumeId,
+      jobSemanticStatus,
+    })) return;
     const timer = window.setTimeout(() => void loadSemanticMatches(Number(selectedResumeId)), 0);
     return () => window.clearTimeout(timer);
   }, [jobSemanticResumeId, jobSemanticStatus, jobSort, loadSemanticMatches, selectedResumeId, token]);
@@ -460,7 +480,7 @@ export default function Home() {
       setJobsTotal(page.totalElements);
       setJobsPage(nextPage);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法加载更多职位");
+      reportRequestError(reason, "无法加载更多职位");
     } finally {
       setJobsLoadingMore(false);
     }
@@ -486,7 +506,7 @@ export default function Home() {
       setJobsTotal(pages[0]?.totalElements ?? jobsTotal);
       setJobsPage(Math.max(0, pageCount - 1));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法加载完整职位库");
+      reportRequestError(reason, "无法加载完整职位库");
     } finally {
       setJobsLoadingMore(false);
     }
@@ -508,7 +528,7 @@ export default function Home() {
       setHistoryTotal(page.totalElements);
       setHistoryPage(nextPage);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法加载更多分析记录");
+      reportRequestError(reason, "无法加载更多分析记录");
     } finally {
       setHistoryLoadingMore(false);
     }
@@ -539,15 +559,19 @@ export default function Home() {
       });
     void refreshSession().then(async (session) => {
       if (!session || !active) return;
+      const sessionId = getAuthSessionId();
       setToken(session.accessToken);
       setUser(session.user);
       await loadWorkspace();
-      if (Number.isFinite(analysisIdParam) && analysisIdParam > 0 && active) {
+      if (!active || !isAuthSessionCurrent(sessionId)) return;
+      if (Number.isFinite(analysisIdParam) && analysisIdParam > 0) {
         try {
           const requestedAnalysis = await apiRequest<Analysis>(`/api/analysis-histories/${analysisIdParam}`);
-          if (active) setAnalysis(requestedAnalysis);
+          if (!active || !isAuthSessionCurrent(sessionId)) return;
+          setAnalysis(requestedAnalysis);
         } catch (reason) {
-          if (active) setError(reason instanceof Error ? reason.message : "无法读取指定分析报告");
+          if (!active || !isAuthSessionCurrent(sessionId)) return;
+          reportRequestError(reason, "无法读取指定分析报告");
         }
       }
     });
@@ -579,7 +603,7 @@ export default function Home() {
       setNotice(`欢迎回来，${result.user.displayName}`);
       await loadWorkspace();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "登录失败");
+      reportRequestError(reason, "登录失败");
     } finally {
       setBusy("");
     }
@@ -615,7 +639,7 @@ export default function Home() {
       chooseResume(detail.id);
       setNotice(`正在编辑简历 #${detail.id}，保存后将更新并失效旧向量索引`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "加载简历失败");
+      reportRequestError(reason, "加载简历失败");
     } finally {
       setBusy("");
     }
@@ -679,7 +703,7 @@ export default function Home() {
       setEditingResumeId(null);
       setFile(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "简历保存失败");
+      reportRequestError(reason, "简历保存失败");
     } finally {
       setBusy("");
     }
@@ -708,7 +732,7 @@ export default function Home() {
       invalidateSemanticMatches();
       setEditingJobId(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "JD 保存失败");
+      reportRequestError(reason, "JD 保存失败");
     } finally {
       setBusy("");
     }
@@ -726,7 +750,7 @@ export default function Home() {
       if (analysis?.resumeId === id) setAnalysis(null);
       setNotice(`简历 #${id} 已删除`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除简历失败");
+      reportRequestError(reason, "删除简历失败");
     } finally {
       setBusy("");
     }
@@ -746,7 +770,7 @@ export default function Home() {
       invalidateSemanticMatches();
       setNotice(`职位 #${id} 已删除`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除职位失败");
+      reportRequestError(reason, "删除职位失败");
     } finally {
       setBusy("");
     }
@@ -776,7 +800,7 @@ export default function Home() {
       setShowBulkImport(false);
       setNotice(`已批量导入 ${imported.length} 条职位（POST /api/job-descriptions/import）`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "批量导入失败");
+      reportRequestError(reason, "批量导入失败");
     } finally {
       setBusy("");
     }
@@ -801,7 +825,7 @@ export default function Home() {
       downloadTextFile(reportFilename(analysis, "md"), markdown, "text/markdown;charset=utf-8");
       setNotice("已下载 Markdown 报告");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "导出 Markdown 失败");
+      reportRequestError(reason, "导出 Markdown 失败");
     }
   }
 
@@ -814,7 +838,7 @@ export default function Home() {
       openPrintableReport(buildReportPrintHtml(analysis));
       setNotice("已打开打印预览：请选择「另存为 PDF」");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "导出 PDF 失败");
+      reportRequestError(reason, "导出 PDF 失败");
     }
   }
 
@@ -855,7 +879,7 @@ export default function Home() {
     } catch (reason) {
       if (!run || isCurrentAnalysisRun(run)) {
         activeAnalysisRun.current = null;
-        setError(reason instanceof Error ? reason.message : "示例流程失败");
+        reportRequestError(reason, "示例流程失败");
       }
     } finally {
       setBusy("");
@@ -885,7 +909,7 @@ export default function Home() {
     } catch (reason) {
       if (isCurrentAnalysisRun(run)) {
         activeAnalysisRun.current = null;
-        setError(reason instanceof Error ? reason.message : "AI 分析失败");
+        reportRequestError(reason, "AI 分析失败");
       }
     } finally {
       setBusy("");
@@ -952,7 +976,7 @@ export default function Home() {
     } catch (reason) {
       if (!currentRun || isCurrentAnalysisRun(currentRun)) {
         activeAnalysisRun.current = null;
-        setError(reason instanceof Error ? reason.message : "Top N 分析失败");
+        reportRequestError(reason, "Top N 分析失败");
       }
     } finally {
       setBusy("");

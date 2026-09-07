@@ -6,6 +6,7 @@ import {
   DEFAULT_JOB_SORT,
   requestSemanticMatches,
   semanticAnalysisTargets,
+  shouldAutoLoadSemanticMatches,
 } from "../app/semantic-ranking.ts";
 
 const matches = [1, 2, 3].map((id, index) => ({
@@ -70,4 +71,57 @@ test("Top N boundary is applied before completed candidates are omitted", () => 
   ] satisfies AnalysisSummary[];
 
   assert.deepEqual(semanticAnalysisTargets(matches, analyses, 1), []);
+});
+
+const autoLoadBase = {
+  hasToken: true,
+  selectedResumeId: 7,
+  jobSort: DEFAULT_JOB_SORT,
+  jobSemanticResumeId: 7 as number | null,
+  jobSemanticStatus: "idle" as const,
+};
+
+test("vector coarse ranking does not auto-retry after the same resume fails", () => {
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    jobSemanticStatus: "error",
+  }), false);
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    jobSemanticStatus: "ready",
+  }), false);
+});
+
+test("vector coarse ranking auto-loads a new resume or an idle reset, not a loading retry", () => {
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    jobSemanticResumeId: null,
+    jobSemanticStatus: "idle",
+  }), true);
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    jobSemanticResumeId: 3,
+    jobSemanticStatus: "error",
+  }), true);
+  // Manual retry clears resumeId and sets loading; the effect must not stack another fetch.
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    jobSemanticResumeId: null,
+    jobSemanticStatus: "loading",
+  }), false);
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    hasToken: false,
+    jobSemanticResumeId: null,
+  }), false);
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    selectedResumeId: "",
+    jobSemanticResumeId: null,
+  }), false);
+  assert.equal(shouldAutoLoadSemanticMatches({
+    ...autoLoadBase,
+    jobSort: "recent",
+    jobSemanticResumeId: null,
+  }), false);
 });

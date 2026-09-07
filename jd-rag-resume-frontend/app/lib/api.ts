@@ -106,6 +106,21 @@ export class ApiError extends Error {
   }
 }
 
+/** True when a request was cancelled because its login session is no longer current. */
+export function isAuthSessionChangedError(reason: unknown): reason is ApiError {
+  return reason instanceof ApiError && reason.code === AUTH_SESSION_CHANGED_CODE;
+}
+
+/**
+ * Toast copy for a failed request. AUTH_SESSION_CHANGED is an expected cancel
+ * after a logout/login, so callers must not surface it to the user who is
+ * current now.
+ */
+export function visibleApiErrorMessage(reason: unknown, fallback: string): string | null {
+  if (isAuthSessionChangedError(reason)) return null;
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 type ApiRequestOptions = {
   auth?: boolean;
   retryAuth?: boolean;
