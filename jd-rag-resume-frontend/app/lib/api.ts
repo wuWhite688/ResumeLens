@@ -121,6 +121,30 @@ export function visibleApiErrorMessage(reason: unknown, fallback: string): strin
   return reason instanceof Error ? reason.message : fallback;
 }
 
+/**
+ * Detail-page delete: AUTH_SESSION_CHANGED is a silent cancel, but busy must
+ * still clear. `return` in catch is fine — finally always runs.
+ */
+export async function runDetailDelete(input: {
+  request: () => Promise<void>;
+  setBusy: (busy: string) => void;
+  setError: (error: string) => void;
+  onDeleted: () => void;
+}): Promise<void> {
+  input.setBusy("delete");
+  input.setError("");
+  try {
+    await input.request();
+    input.onDeleted();
+  } catch (reason) {
+    const message = visibleApiErrorMessage(reason, "删除失败");
+    if (message == null) return;
+    input.setError(message);
+  } finally {
+    input.setBusy("");
+  }
+}
+
 type ApiRequestOptions = {
   auth?: boolean;
   retryAuth?: boolean;

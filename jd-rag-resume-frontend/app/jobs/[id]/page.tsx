@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AppChrome } from "../../components/AppChrome";
-import { apiRequest, visibleApiErrorMessage, type Job } from "../../lib/api";
+import { apiRequest, runDetailDelete, visibleApiErrorMessage, type Job } from "../../lib/api";
 
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
@@ -79,17 +79,12 @@ export default function JobDetailPage() {
 
   async function remove() {
     if (!window.confirm(`确认删除职位 #${id}？`)) return;
-    setBusy("delete");
-    setError("");
-    try {
-      await apiRequest<void>(`/api/job-descriptions/${id}`, { method: "DELETE" });
-      router.replace("/");
-    } catch (reason) {
-      const message = visibleApiErrorMessage(reason, "删除失败");
-      if (message == null) return;
-      setError(message);
-      setBusy("");
-    }
+    await runDetailDelete({
+      request: () => apiRequest<void>(`/api/job-descriptions/${id}`, { method: "DELETE" }),
+      setBusy,
+      setError,
+      onDeleted: () => router.replace("/"),
+    });
   }
 
   return (
