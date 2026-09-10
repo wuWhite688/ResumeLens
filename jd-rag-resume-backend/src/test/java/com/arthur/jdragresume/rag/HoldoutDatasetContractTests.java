@@ -1,17 +1,22 @@
 package com.arthur.jdragresume.rag;
 
+import com.arthur.jdragresume.entity.JobDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -21,6 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HoldoutDatasetContractTests {
+    private static final Method EXTRACT_KEYWORDS = privateMethod("extractKeywords", JobDescription.class);
+    private static final Method MATCH_KEYWORDS = privateMethod("matchKeywords", String.class, List.class);
+    private static final Method CONTAINS_ALIAS = privateMethod("containsAlias", String.class, List.class);
+    private static final Field HARD_SKILL_ALIASES = privateField("HARD_SKILL_ALIASES");
 
     @Test
     void frozenV1DatasetKeepsGoldAndChunkContracts() throws Exception {
@@ -43,6 +52,15 @@ class HoldoutDatasetContractTests {
         properties.setTopK(config.topK());
         properties.setMinSimilarity(config.minSimilarity());
         TextChunker chunker = new TextChunker(properties);
+        ResumeRagService lexicalProbe = new ResumeRagService(
+                null,
+                null,
+                null,
+                properties,
+                null,
+                null,
+                null
+        );
 
         for (Map.Entry<String, String> entry : resumeTexts.entrySet()) {
             int chunks = chunker.split(entry.getValue()).size();
@@ -58,6 +76,7 @@ class HoldoutDatasetContractTests {
         Map<String, Integer> typeCounts = new HashMap<>();
         Map<String, Integer> domainCounts = new HashMap<>();
         Map<String, Set<String>> negativeTargetJobsByDomain = new HashMap<>();
+        int mixedGoldCount = 0;
 
         for (JsonNode pair : root.path("pairs")) {
             String id = requiredText(pair, "id");
@@ -97,36 +116,44 @@ class HoldoutDatasetContractTests {
             JsonNode kinds = pair.path("goldPhraseKinds");
             assertTrue(kinds.isObject(), id + " must define goldPhraseKinds");
             List<String> lexical = strings(kinds.path("lexical"));
+            List<String> mixed = strings(kinds.path("mixed"));
             List<String> semantic = strings(kinds.path("semantic"));
             assertFalse(lexical.isEmpty(), id + " must keep at least one lexical gold phrase");
             assertFalse(semantic.isEmpty(), id + " must keep at least one semantic gold phrase");
+            mixedGoldCount += mixed.size();
 
-            Set<String> classified = new LinkedHashSet<>();
-            classified.addAll(lexical);
-            for (String phrase : semantic) {
-                assertTrue(classified.add(phrase), id + " phrase classified as both lexical and semantic: " + phrase);
-            }
-            assertEquals(new LinkedHashSet<>(gold), classified, id + " goldPhraseKinds must cover goldPhrases exactly");
+            Map<String, String> classified = new LinkedHashMap<>();
+            addClassifications(classified, lexical, "lexical", id);
+            addClassifications(classified, mixed, "mixed", id);
+            addClassifications(classified, semantic, "semantic", id);
+            assertEquals(new LinkedHashSet<>(gold), classified.keySet(), id + " goldPhraseKinds must cover goldPhrases exactly");
 
             String resumeText = assertPresent(resumeTexts, resumeId, id, "resume");
             String jobText = assertPresent(jobTexts, jobId, id, "job");
+            JsonNode jobSpec = jobs.get(jobId);
 
             for (String phrase : gold) {
                 assertTrue(
                         resumeText.contains(phrase),
                         () -> id + " goldPhrase is not present in resume text: " + phrase
                 );
-            }
-            for (String phrase : lexical) {
-                assertTrue(
-                        jobText.contains(phrase),
-                        () -> id + " lexical phrase must also appear verbatim in JD: " + phrase
+
+                boolean verbatimInJd = jobText.contains(phrase);
+                boolean productionLexicalHit = productionLexicalHit(
+                        lexicalProbe,
+                        jobSpec,
+                        jobText,
+                        phrase
                 );
-            }
-            for (String phrase : semantic) {
-                assertFalse(
-                        jobText.contains(phrase),
-                        () -> id + " semantic phrase unexpectedly appears verbatim in JD: " + phrase
+                String expectedKind = verbatimInJd
+                        ? "lexical"
+                        : productionLexicalHit ? "mixed" : "semantic";
+                assertEquals(
+                        expectedKind,
+                        classified.get(phrase),
+                        () -> id + " goldPhrase kind does not match the current production lexical path: "
+                                + phrase + " (verbatimInJd=" + verbatimInJd
+                                + ", productionLexicalHit=" + productionLexicalHit + ")"
                 );
             }
 
@@ -142,6 +169,7 @@ class HoldoutDatasetContractTests {
         assertEquals(12, typeCounts.getOrDefault("hard_negative", 0));
         assertEquals(18, domainCounts.getOrDefault(HoldoutRunnerSupport.SEEN_DOMAIN, 0));
         assertEquals(18, domainCounts.getOrDefault(HoldoutRunnerSupport.NEW_DOMAIN, 0));
+        assertTrue(mixedGoldCount > 0, "holdout v1 should exercise at least one mixed lexical/semantic gold phrase");
 
         assertEquals(
                 6,
@@ -153,6 +181,92 @@ class HoldoutDatasetContractTests {
                 negativeTargetJobsByDomain.getOrDefault(HoldoutRunnerSupport.NEW_DOMAIN, Set.of()).size(),
                 "new_domain negative pairs should spread across all six target JDs"
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean productionLexicalHit(
+            ResumeRagService lexicalProbe,
+            JsonNode jobSpec,
+            String jobText,
+            String phrase
+    ) throws Exception {
+        JobDescription job = materializeJob(jobSpec, jobText);
+        List<String> keywords = (List<String>) EXTRACT_KEYWORDS.invoke(lexicalProbe, job);
+        List<String> keywordHits = (List<String>) MATCH_KEYWORDS.invoke(lexicalProbe, phrase, keywords);
+        if (!keywordHits.isEmpty()) {
+            return true;
+        }
+
+        String jdBlob = String.join("\n",
+                nullToEmpty(job.getTitle()),
+                nullToEmpty(job.getDescription()),
+                nullToEmpty(job.getRequirements())
+        ).toLowerCase(Locale.ROOT);
+        String evidence = phrase.toLowerCase(Locale.ROOT);
+        Map<String, List<String>> aliases = (Map<String, List<String>>) HARD_SKILL_ALIASES.get(null);
+        for (List<String> aliasSet : aliases.values()) {
+            boolean requiredByJd = (boolean) CONTAINS_ALIAS.invoke(null, jdBlob, aliasSet);
+            boolean suppliedByPhrase = (boolean) CONTAINS_ALIAS.invoke(null, evidence, aliasSet);
+            if (requiredByJd && suppliedByPhrase) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static JobDescription materializeJob(JsonNode spec, String text) {
+        JobDescription job = new JobDescription();
+        job.setTitle(requiredText(spec, "title"));
+        job.setCompanyName(requiredText(spec, "companyName"));
+        job.setLocation(requiredText(spec, "location"));
+        job.setEmploymentType(requiredText(spec, "employmentType"));
+        int requirementsAt = text.indexOf("任职要求");
+        if (requirementsAt >= 0) {
+            job.setDescription(text.substring(0, requirementsAt).trim());
+            job.setRequirements(text.substring(requirementsAt).trim());
+        } else {
+            job.setDescription(text.trim());
+            job.setRequirements("");
+        }
+        return job;
+    }
+
+    private static void addClassifications(
+            Map<String, String> classified,
+            List<String> phrases,
+            String kind,
+            String pairId
+    ) {
+        for (String phrase : phrases) {
+            assertTrue(
+                    classified.put(phrase, kind) == null,
+                    pairId + " phrase classified more than once: " + phrase
+            );
+        }
+    }
+
+    private static Method privateMethod(String name, Class<?>... arguments) {
+        try {
+            Method method = ResumeRagService.class.getDeclaredMethod(name, arguments);
+            method.setAccessible(true);
+            return method;
+        } catch (ReflectiveOperationException ex) {
+            throw new ExceptionInInitializerError(ex);
+        }
+    }
+
+    private static Field privateField(String name) {
+        try {
+            Field field = ResumeRagService.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException ex) {
+            throw new ExceptionInInitializerError(ex);
+        }
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private static Map<String, JsonNode> indexById(JsonNode values) {
