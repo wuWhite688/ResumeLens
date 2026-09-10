@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * One-shot holdout evaluation against the exact committed production RAG defaults.
+ * One-shot holdout evaluation against the committed production retrieval-selection defaults.
  *
  * <p>This runner intentionally delegates scoring/aggregation to the legacy ablation helpers so
  * holdout numbers stay directly comparable with experiments/rag-ablation. The old helpers are
@@ -115,11 +115,7 @@ class HoldoutExperimentTests {
 
         HoldoutRunnerSupport.RunPlan plan =
                 HoldoutRunnerSupport.planRun(datasetDir, holdoutRoot, runLog, mapper);
-        DatasetFile dataset = loadDataset(datasetDir, mapper);
-        assertFalse(dataset.pairs().isEmpty(), "dataset pairs must not be empty");
-
         HoldoutRunnerSupport.ProductionConfig config = HoldoutRunnerSupport.loadProductionConfig();
-        validateDataset(dataset);
 
         if (!plan.formal()) {
             deleteRecursively(plan.outputRoot());
@@ -129,6 +125,7 @@ class HoldoutExperimentTests {
         Path logsDir = outputRoot.resolve("logs");
         Files.createDirectories(resultsDir);
         Files.createDirectories(logsDir);
+        Files.deleteIfExists(outputRoot.resolve("FAILURE.txt"));
 
         String commitSha = resolveCommitSha(repoRoot);
         Path consoleLog = logsDir.resolve("holdout-console.log");
@@ -154,6 +151,10 @@ class HoldoutExperimentTests {
             log("dataset=" + datasetDir.toAbsolutePath(), log);
             log("commit=" + commitSha, log);
             log("config=" + config, log);
+
+            DatasetFile dataset = loadDataset(datasetDir, mapper);
+            validateDataset(dataset);
+            assertFalse(dataset.pairs().isEmpty(), "dataset pairs must not be empty");
 
             RagProperties properties = productionProperties(config);
             TextChunker chunker = new TextChunker(properties);
@@ -287,6 +288,7 @@ class HoldoutExperimentTests {
                     configRows,
                     config,
                     plan,
+                    repoRoot,
                     datasetDir,
                     commitSha
             );
@@ -530,6 +532,7 @@ class HoldoutExperimentTests {
             List<Map<String, Object>> configRows,
             HoldoutRunnerSupport.ProductionConfig config,
             HoldoutRunnerSupport.RunPlan plan,
+            Path repoRoot,
             Path datasetDir,
             String commitSha
     ) {
@@ -537,7 +540,7 @@ class HoldoutExperimentTests {
         md.append("# Holdout 单配置评测\n\n");
         md.append("- 运行时间：").append(Instant.now()).append('\n');
         md.append("- 被测 commit：`").append(commitSha).append("`\n");
-        md.append("- 数据集：`").append(datasetDir.toAbsolutePath().normalize()).append("`\n");
+        md.append("- 数据集：`").append(displayPath(repoRoot, datasetDir)).append("`\n");
         md.append("- holdoutVersion：")
                 .append(plan.holdoutVersion() == null ? "`(none — smoke)`" : "`" + plan.holdoutVersion() + "`")
                 .append('\n');
@@ -578,7 +581,9 @@ class HoldoutExperimentTests {
                 .append(ragRequests).append(" / ").append(dataset.pairs().size()).append("。\n\n");
 
         md.append("## 解读限制\n\n");
-        md.append("完整限制见 [`PROTOCOL.md` §6](PROTOCOL.md)。尤其要注意：块级金标由人工挑定的 ")
+        String protocolLink = plan.formal() ? "PROTOCOL.md" : "../PROTOCOL.md";
+        md.append("完整限制见 [`PROTOCOL.md` §6](").append(protocolLink)
+                .append(")。尤其要注意：块级金标由人工挑定的 ")
                 .append("`goldPhrases` 按字面命中派生，会系统性偏袒关键词通路；")
                 .append("因此块级 P/R/F1 只能在这一金标定义下解读，不能当成最终 LLM 匹配准确率。\n");
         return md.toString();
@@ -712,18 +717,28 @@ class HoldoutExperimentTests {
     }
 
     private static String resolveCommitSha(Path repoRoot) throws Exception {
-        String githubSha = System.getenv("GITHUB_SHA");
-        if (githubSha != null && githubSha.matches("[0-9a-fA-F]{40}")) {
-            return githubSha.toLowerCase(Locale.ROOT);
-        }
         Process process = new ProcessBuilder("git", "-C", repoRoot.toString(), "rev-parse", "HEAD")
                 .redirectErrorStream(true)
                 .start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        if (process.waitFor() != 0 || !output.matches("[0-9a-fA-F]{40}")) {
-            throw new IllegalStateException("cannot determine tested commit SHA: " + output);
+        if (process.waitFor() == 0 && output.matches("[0-9a-fA-F]{40}")) {
+            return output.toLowerCase(Locale.ROOT);
         }
-        return output.toLowerCase(Locale.ROOT);
+
+        String githubSha = System.getenv("GITHUB_SHA");
+        if (githubSha != null && githubSha.matches("[0-9a-fA-F]{40}")) {
+            return githubSha.toLowerCase(Locale.ROOT);
+        }
+        throw new IllegalStateException("cannot determine tested commit SHA: " + output);
+    }
+
+    private static String displayPath(Path repoRoot, Path path) {
+        Path absoluteRoot = repoRoot.toAbsolutePath().normalize();
+        Path absolutePath = path.toAbsolutePath().normalize();
+        if (absolutePath.startsWith(absoluteRoot)) {
+            return absoluteRoot.relativize(absolutePath).toString().replace('\\', '/');
+        }
+        return absolutePath.toString().replace('\\', '/');
     }
 
     private static String resolveModelResource(String environmentVariable, Path localPath, String configuredUri) {
