@@ -97,11 +97,17 @@ final class HoldoutRunnerSupport {
             throw new IllegalStateException("RUN-LOG.md is missing: " + runLog.toAbsolutePath());
         }
         String expected = "## " + version;
-        boolean found = Files.readAllLines(runLog, StandardCharsets.UTF_8).stream()
-                .anyMatch(expected::equals);
-        if (!found) {
+        long matches = Files.readAllLines(runLog, StandardCharsets.UTF_8).stream()
+                .filter(expected::equals)
+                .count();
+        if (matches == 0) {
             throw new IllegalStateException(
                     "RUN-LOG.md has no exact section '" + expected + "'; refusing to create one automatically"
+            );
+        }
+        if (matches != 1) {
+            throw new IllegalStateException(
+                    "RUN-LOG.md must contain exactly one section '" + expected + "'; found " + matches
             );
         }
     }
