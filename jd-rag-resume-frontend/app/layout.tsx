@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./workspace.css";
 import { ExtensionBridgeHost } from "./components/ExtensionBridgeHost";
 
 export const metadata: Metadata = {
