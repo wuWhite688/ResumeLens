@@ -1,6 +1,9 @@
 /* The matching workbench follows the approved report-first design. */
-:root { --ink: #23352e; --muted: #64756d; --paper: #f5f6f3; --panel: #fff; --line: #e1e8e2; --mint-dark: #23694e; }
-.refined-workspace { font-size: 14px; line-height: 1.65; }
+/* Palette overrides stay inside the workbench. Declared on :root they would also
+   repaint the sign-in page, which is not wrapped in .refined-workspace. */
+.refined-workspace { --ink: #23352e; --muted: #64756d; --paper: #f5f6f3; --panel: #fff; --line: #e1e8e2; --mint-dark: #23694e; }
+/* body paints from the global palette, so the workbench paints its own ground. */
+.refined-workspace { background: var(--paper); color: var(--ink); font-size: 14px; line-height: 1.65; }
 .refined-workspace [hidden] { display: none !important; }
 .refined-workspace .workspace { margin: 0 auto; max-width: 1440px; padding: 36px clamp(20px, 4vw, 56px) 64px; }
 .workspace-nav { min-height: 76px; display: flex; align-items: center; gap: 40px; padding: 0 clamp(20px, 4vw, 56px); border-bottom: 1px solid var(--line); background: var(--panel); }
