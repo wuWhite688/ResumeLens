@@ -67,6 +67,28 @@ jobs:
           RAG_EMBEDDING_MODEL_URI: file:${{ runner.temp }}/gte-multilingual-base-int8/model_int8.onnx
         run: ./mvnw -B --no-transfer-progress -Dtest=RealEmbeddingRegressionTests test
 
+      # PR #36 implementation-only acceptance. Remove this step after it has produced one green run.
+      - name: 临时验收 holdout smoke（dev 数据）
+        working-directory: jd-rag-resume-backend
+        env:
+          RUN_HOLDOUT: "true"
+          HOLDOUT_DIR: ../experiments/threshold-sweep/dataset
+          RAG_EMBEDDING_TOKENIZER_URI: file:${{ runner.temp }}/gte-multilingual-base-int8/tokenizer.json
+          RAG_EMBEDDING_MODEL_URI: file:${{ runner.temp }}/gte-multilingual-base-int8/model_int8.onnx
+        run: |
+          set -euo pipefail
+          before="$(sha256sum ../experiments/holdout/RUN-LOG.md | cut -d ' ' -f1)"
+          ./mvnw -B --no-transfer-progress -Dtest=HoldoutExperimentTests test
+          after="$(sha256sum ../experiments/holdout/RUN-LOG.md | cut -d ' ' -f1)"
+          test "$before" = "$after"
+          test -s ../experiments/holdout/.smoke/RESULTS.md
+          test -s ../experiments/holdout/.smoke/results/config-metrics.json
+          test -s ../experiments/holdout/.smoke/results/pair-metrics.json
+          git status --porcelain --untracked-files=all ../experiments/holdout/.smoke | grep -q '^' && {
+            echo '.smoke output unexpectedly visible to git'
+            exit 1
+          } || true
+
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
