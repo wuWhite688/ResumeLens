@@ -42,7 +42,10 @@ export function MatchReport({ analysis, job, saved, disabled, onBookmark, onExpo
   const [jobError, setJobError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [retry, setRetry] = useState(0);
+  // Separate counters on purpose: a shared one would let the JD retry re-run the
+  // resume effect, whose setDraft() would silently overwrite unsaved edits.
+  const [resumeRetry, setResumeRetry] = useState(0);
+  const [jobRetry, setJobRetry] = useState(0);
   const [showFiltered, setShowFiltered] = useState(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -73,7 +76,7 @@ export function MatchReport({ analysis, job, saved, disabled, onBookmark, onExpo
       setLoading(false);
     });
     return () => { active = false; };
-  }, [analysis.resumeId, retry]);
+  }, [analysis.resumeId, resumeRetry]);
 
   useEffect(() => {
     if (job?.id === analysis.jobDescriptionId) return;
@@ -82,7 +85,7 @@ export function MatchReport({ analysis, job, saved, disabled, onBookmark, onExpo
       if (active) { setReportJob(item); setJobError(""); }
     }).catch(() => { if (active) setJobError("无法读取岗位原文，岗位可能已删除。"); });
     return () => { active = false; };
-  }, [analysis.jobDescriptionId, job?.id, retry]);
+  }, [analysis.jobDescriptionId, job?.id, jobRetry]);
 
   async function saveCopy() {
     if (!original || !draft.trim() || saving) return;
@@ -131,11 +134,11 @@ export function MatchReport({ analysis, job, saved, disabled, onBookmark, onExpo
         {suggestions.length > 0 && <ul className="rewrite-suggestions">{suggestions.map((text, index) => <li key={index}>{text}</li>)}</ul>}
         {loading ? <p role="status">正在读取原简历…</p> : original ? <div className="rewrite-compare"><section><h3>当前简历原文</h3><p className="review-caveat">历史报告可能对应较早版本，请核对修改时间。</p><p className="source-text">{original.rawText || "原文为空"}</p></section><section><label htmlFor="resume-draft">修改草稿 · 可直接编辑</label><textarea id="resume-draft" rows={16} value={draft} onChange={event => setDraft(event.target.value)} disabled={saving} /></section></div> : null}
         <p className="review-caveat warning">仅补充亲自完成、能够验证的经历和数字。切换报告前请另存或下载草稿。</p>
-        {draftError && <div className="message error" role="alert">{draftError}{!original && <button type="button" className="ghost" onClick={() => { setLoading(true); setRetry(value => value + 1); }}>重试读取</button>}</div>}
+        {draftError && <div className="message error" role="alert">{draftError}{!original && <button type="button" className="ghost" onClick={() => { setLoading(true); setResumeRetry(value => value + 1); }}>重试读取</button>}</div>}
         <div className="form-actions"><button type="button" className="primary" disabled={disabled || saving || !original || !draft.trim() || draft === original.rawText} onClick={() => void saveCopy()}>{saving ? "保存中…" : "另存为新简历"}</button><button type="button" className="ghost" disabled={!draft.trim()} onClick={() => downloadTextFile(`resume-${analysis.resumeId}-draft.txt`, draft, "text/plain;charset=utf-8")}>下载草稿</button></div>
         {questions.length > 0 && <details className="review-evidence interview-questions"><summary><h3>面试准备问题</h3><span>⌄</span></summary><ol>{questions.map((text, index) => <li key={index}>{text}</li>)}</ol></details>}
       </>}
-      {tab === "jd" && <>{currentJob ? <><h3>岗位职责</h3><p className="source-text">{currentJob.description || "未提供岗位职责"}</p><h3>任职要求</h3><p className="source-text">{currentJob.requirements || "未提供任职要求"}</p></> : <p role="status">{jobError || "正在读取岗位要求…"}{jobError && <button className="ghost" onClick={() => setRetry(value => value + 1)}>重试</button>}</p>}</>}
+      {tab === "jd" && <>{currentJob ? <><h3>岗位职责</h3><p className="source-text">{currentJob.description || "未提供岗位职责"}</p><h3>任职要求</h3><p className="source-text">{currentJob.requirements || "未提供任职要求"}</p></> : <p role="status">{jobError || "正在读取岗位要求…"}{jobError && <button className="ghost" onClick={() => setJobRetry(value => value + 1)}>重试</button>}</p>}</>}
     </div>
     <footer className="review-footer"><div><span className="review-muted">{new Date(analysis.createdAt).toLocaleString("zh-CN")}</span><div className="review-export"><button type="button" className="text-action" onClick={onExportMarkdown}>导出 Markdown</button><button type="button" className="text-action" onClick={onExportPdf}>导出 PDF</button></div></div>{tab !== "edit" && <button type="button" className="primary" onClick={() => setTab("edit")}>对照原文修改 →</button>}</footer>
   </>;
