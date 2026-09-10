@@ -37,6 +37,9 @@ compose.env
 **/uploads/resumes/
 models/
 
+# Holdout smoke-run output is disposable and must never look like formal results
+/experiments/holdout/.smoke/
+
 # Runtime logs and process markers
 *.log
 *.pid
