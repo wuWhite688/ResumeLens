@@ -153,6 +153,10 @@ export default function Home() {
   const [pageView, setPageView] = useState<WorkspaceView>("match");
   const [savedJobs, setSavedJobs] = useState<number[]>([]);
   const [fetchingReport, setFetchingReport] = useState(false);
+  // Bumped by every chooseResume call. Re-selecting the same resume leaves
+  // selectedResumeId unchanged, so without this counter nothing would depend-change
+  // to refetch the per-job scores that chooseResume just cleared.
+  const [resumeScopeEpoch, setResumeScopeEpoch] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [auth, setAuth] = useState({ username: "", password: "", email: "", displayName: "" });
@@ -217,6 +221,7 @@ export default function Home() {
     setJobSemanticStatus("idle");
     setJobSemanticError("");
     setAnalysis((current) => current && current.resumeId !== next ? null : current);
+    setResumeScopeEpoch((value) => value + 1);
     setSelectedResumeId(next);
   }, []);
 
@@ -408,7 +413,7 @@ export default function Home() {
     if (!token || !selectedResumeId) return;
     const timer = window.setTimeout(() => void loadJobAnalyses(selectedResumeId), 0);
     return () => window.clearTimeout(timer);
-  }, [loadJobAnalyses, selectedResumeId, token]);
+  }, [loadJobAnalyses, resumeScopeEpoch, selectedResumeId, token]);
 
   useEffect(() => {
     if (!shouldAutoLoadSemanticMatches({
