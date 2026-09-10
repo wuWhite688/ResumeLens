@@ -84,10 +84,10 @@ jobs:
           test -s ../experiments/holdout/.smoke/RESULTS.md
           test -s ../experiments/holdout/.smoke/results/config-metrics.json
           test -s ../experiments/holdout/.smoke/results/pair-metrics.json
-          git status --porcelain --untracked-files=all ../experiments/holdout/.smoke | grep -q '^' && {
+          if [ -n "$(git status --porcelain --untracked-files=all ../experiments/holdout/.smoke)" ]; then
             echo '.smoke output unexpectedly visible to git'
             exit 1
-          } || true
+          fi
 
       - name: 上传测试报告
         if: always()
