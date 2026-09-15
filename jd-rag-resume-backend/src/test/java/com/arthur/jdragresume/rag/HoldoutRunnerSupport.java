@@ -19,11 +19,27 @@ import java.util.Locale;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 final class HoldoutRunnerSupport {
     static final String SEEN_DOMAIN = "seen_domain";
     static final String NEW_DOMAIN = "new_domain";
     private static final Pattern VERSION = Pattern.compile("v[1-9][0-9]*");
+    private static final int DIRTY_PREVIEW_LIMIT = 10;
+
+    /**
+     * Checks that must hold before a formal holdout run consumes its single reporting slot.
+     * Injectable so the support tests can exercise {@link #planRun} against temporary
+     * directories that are not git worktrees.
+     */
+    @FunctionalInterface
+    interface FreezeGuard {
+        void check(Path repoRoot, Path datasetDir, JsonNode dataset) throws IOException;
+    }
+
+    static final FreezeGuard DEFAULT_FREEZE_GUARD = HoldoutRunnerSupport::enforceFreeze;
+    static final FreezeGuard NO_FREEZE_GUARD = (repoRoot, datasetDir, dataset) -> {
+    };
 
     private HoldoutRunnerSupport() {
     }
@@ -71,6 +87,16 @@ final class HoldoutRunnerSupport {
     }
 
     static RunPlan planRun(Path datasetDir, Path holdoutRoot, Path runLog, ObjectMapper mapper) throws IOException {
+        return planRun(datasetDir, holdoutRoot, runLog, mapper, DEFAULT_FREEZE_GUARD);
+    }
+
+    static RunPlan planRun(
+            Path datasetDir,
+            Path holdoutRoot,
+            Path runLog,
+            ObjectMapper mapper,
+            FreezeGuard freezeGuard
+    ) throws IOException {
         Path pairs = datasetDir.resolve("pairs.json");
         if (!Files.isRegularFile(pairs)) {
             throw new IllegalStateException("missing dataset: " + pairs.toAbsolutePath());
@@ -89,7 +115,150 @@ final class HoldoutRunnerSupport {
             throw new IllegalStateException("holdoutVersion must match v1, v2, ...; got " + version);
         }
         requireVersionSection(runLog, version);
+        freezeGuard.check(repoRootOf(holdoutRoot), datasetDir, root);
         return new RunPlan(true, version, holdoutRoot);
+    }
+
+    /**
+     * {@code holdoutRoot} is always {@code <repo>/experiments/holdout} for a real run.
+     */
+    static Path repoRootOf(Path holdoutRoot) {
+        Path experiments = holdoutRoot.toAbsolutePath().normalize().getParent();
+        Path repoRoot = experiments == null ? null : experiments.getParent();
+        if (repoRoot == null) {
+            throw new IllegalStateException("cannot derive repository root from holdout root " + holdoutRoot);
+        }
+        return repoRoot;
+    }
+
+    /**
+     * A formal run must be fully described by the commit SHA written to RUN-LOG.md. Living inside
+     * the repository is not enough on its own: {@code .gitignore} already excludes {@code /data/},
+     * {@code models/} and {@code **}{@code /uploads/resumes/}, and {@code git status --porcelain}
+     * stays silent about ignored paths, so an in-repo but untracked dataset would slip through both
+     * of the cheaper checks.
+     */
+    private static void enforceFreeze(Path repoRoot, Path datasetDir, JsonNode dataset) throws IOException {
+        List<Path> files = datasetFiles(datasetDir, dataset);
+        for (Path file : files) {
+            requireDatasetInsideRepo(repoRoot, file);
+        }
+        requireCleanWorktree(repoRoot);
+        requireTrackedInHead(repoRoot, files);
+    }
+
+    /**
+     * {@code pairs.json} plus every resume/job document it points at. These are resolved the same
+     * way the runner resolves them, so the guard covers exactly the files the run will read.
+     */
+    static List<Path> datasetFiles(Path datasetDir, JsonNode dataset) {
+        List<Path> files = new ArrayList<>();
+        files.add(datasetDir.resolve("pairs.json"));
+        for (String field : List.of("resumes", "jobs")) {
+            JsonNode array = dataset == null ? null : dataset.get(field);
+            if (array == null || !array.isArray()) {
+                continue;
+            }
+            for (JsonNode entry : array) {
+                JsonNode file = entry.get("file");
+                if (file != null && file.isTextual() && !file.asText().isBlank()) {
+                    files.add(datasetDir.resolve(file.asText().trim()));
+                }
+            }
+        }
+        return List.copyOf(files);
+    }
+
+    /**
+     * Uses the real path rather than {@link Path#normalize()} so a symlink inside the repository
+     * cannot point the dataset at content the commit SHA does not describe.
+     */
+    static void requireDatasetInsideRepo(Path repoRoot, Path datasetPath) throws IOException {
+        Path root = realPath(repoRoot);
+        Path target = realPath(datasetPath);
+        if (!target.startsWith(root)) {
+            throw new IllegalStateException(
+                    "a formal holdout dataset must live inside the repository so the recorded commit SHA covers it; "
+                            + "got " + target + " outside " + root
+            );
+        }
+    }
+
+    private static Path realPath(Path path) throws IOException {
+        try {
+            return path.toRealPath();
+        } catch (IOException ex) {
+            return path.toAbsolutePath().normalize();
+        }
+    }
+
+    static void requireCleanWorktree(Path repoRoot) throws IOException {
+        GitResult result = git(repoRoot, "status", "--porcelain");
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException(
+                    "cannot determine worktree cleanliness (git status exited " + result.exitCode() + "): "
+                            + result.output().trim()
+            );
+        }
+        assertCleanWorktree(result.output());
+    }
+
+    static void assertCleanWorktree(String porcelainOutput) {
+        List<String> dirty = porcelainOutput.lines()
+                .map(String::stripTrailing)
+                .filter(line -> !line.isBlank())
+                .toList();
+        if (dirty.isEmpty()) {
+            return;
+        }
+        String preview = dirty.stream()
+                .limit(DIRTY_PREVIEW_LIMIT)
+                .collect(Collectors.joining("; "));
+        throw new IllegalStateException(
+                "refusing a formal holdout run with a dirty worktree (" + dirty.size() + " entries): "
+                        + preview + (dirty.size() > DIRTY_PREVIEW_LIMIT ? "; …" : "")
+                        + ". Commit or stash first so the commit SHA written to RUN-LOG.md describes "
+                        + "exactly what was tested."
+        );
+    }
+
+    /**
+     * The worktree being clean only means tracked files are unmodified; ignored and untracked files
+     * are invisible to {@code git status --porcelain}. This asserts the dataset is actually in the
+     * index, which equals HEAD once the worktree is known clean.
+     */
+    static void requireTrackedInHead(Path repoRoot, List<Path> files) throws IOException {
+        List<String> arguments = new ArrayList<>(List.of("ls-files", "--error-unmatch", "--"));
+        for (Path file : files) {
+            arguments.add(file.toAbsolutePath().normalize().toString());
+        }
+        GitResult result = git(repoRoot, arguments.toArray(new String[0]));
+        assertAllTracked(result.exitCode(), result.output(), files);
+    }
+
+    static void assertAllTracked(int exitCode, String output, List<Path> files) {
+        if (exitCode == 0) {
+            return;
+        }
+        throw new IllegalStateException(
+                "refusing a formal holdout run: " + files.size()
+                        + " dataset file(s) checked, but at least one is not tracked by git, so the commit SHA "
+                        + "written to RUN-LOG.md would not describe it (note that .gitignore hides such files "
+                        + "from `git status`). git ls-files said: " + output.trim()
+        );
+    }
+
+    private static GitResult git(Path repoRoot, String... arguments) throws IOException {
+        List<String> command = new ArrayList<>(List.of("git", "-C", repoRoot.toString()));
+        command.addAll(List.of(arguments));
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        try {
+            return new GitResult(process.waitFor(), output);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while running git " + String.join(" ", arguments), ex);
+        }
     }
 
     static void requireVersionSection(Path runLog, String version) throws IOException {
@@ -250,5 +419,8 @@ final class HoldoutRunnerSupport {
     }
 
     record RunPlan(boolean formal, String holdoutVersion, Path outputRoot) {
+    }
+
+    private record GitResult(int exitCode, String output) {
     }
 }
