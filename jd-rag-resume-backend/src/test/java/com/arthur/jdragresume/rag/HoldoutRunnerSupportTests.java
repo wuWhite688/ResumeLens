@@ -1,5 +1,6 @@
 package com.arthur.jdragresume.rag;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -62,7 +63,7 @@ class HoldoutRunnerSupportTests {
         assertFalse(plan.formal());
         assertEquals(holdoutRoot.resolve(".smoke"), plan.outputRoot());
         assertEquals(before, Files.readString(runLog, StandardCharsets.UTF_8));
-        assertTrue(guard.invocations.isEmpty(), "smoke runs must not be subject to the freeze guard");
+        assertTrue(guard.repoRoots.isEmpty(), "smoke runs must not be subject to the freeze guard");
     }
 
     @Test
@@ -126,7 +127,7 @@ class HoldoutRunnerSupportTests {
     }
 
     @Test
-    void formalRunAppliesFreezeGuardWithRepoRootAndDataset() throws Exception {
+    void formalRunAppliesFreezeGuardWithRepoRootDatasetAndParsedPairs() throws Exception {
         Path repoRoot = tempDir.resolve("repo");
         Path holdoutRoot = repoRoot.resolve("experiments").resolve("holdout");
         Path dataset = holdoutRoot.resolve("dataset");
@@ -134,7 +135,7 @@ class HoldoutRunnerSupportTests {
         Files.createDirectories(dataset);
         Files.writeString(
                 dataset.resolve("pairs.json"),
-                "{\"holdoutVersion\":\"v1\"}",
+                "{\"holdoutVersion\":\"v1\",\"resumes\":[{\"id\":\"r1\",\"file\":\"resumes/r1.md\"}]}",
                 StandardCharsets.UTF_8
         );
         Files.writeString(runLog, runLogWithV1(), StandardCharsets.UTF_8);
@@ -144,15 +145,16 @@ class HoldoutRunnerSupportTests {
                 HoldoutRunnerSupport.planRun(dataset, holdoutRoot, runLog, new ObjectMapper(), guard);
 
         assertTrue(plan.formal());
-        assertEquals(1, guard.invocations.size());
+        assertEquals(1, guard.repoRoots.size());
         assertEquals(
                 repoRoot.toAbsolutePath().normalize(),
-                guard.invocations.get(0)[0].toAbsolutePath().normalize()
+                guard.repoRoots.get(0).toAbsolutePath().normalize()
         );
         assertEquals(
                 dataset.toAbsolutePath().normalize(),
-                guard.invocations.get(0)[1].toAbsolutePath().normalize()
+                guard.datasetDirs.get(0).toAbsolutePath().normalize()
         );
+        assertEquals("v1", guard.datasets.get(0).get("holdoutVersion").asText());
     }
 
     @Test
@@ -177,7 +179,7 @@ class HoldoutRunnerSupportTests {
                         holdoutRoot,
                         runLog,
                         new ObjectMapper(),
-                        (repoRoot, datasetDir) -> {
+                        (repoRoot, datasetDir, parsed) -> {
                             throw new IllegalStateException("frozen-check boom");
                         }
                 )
@@ -194,7 +196,7 @@ class HoldoutRunnerSupportTests {
     }
 
     @Test
-    void dirtyWorktreeOutputIsRejectedAndNamesTheEntries() {
+    void dirtyWorktreeOutputIsRejectedAndKeepsTheStatusCodes() {
         IllegalStateException error = assertThrows(
                 IllegalStateException.class,
                 () -> HoldoutRunnerSupport.assertCleanWorktree(
@@ -204,8 +206,55 @@ class HoldoutRunnerSupportTests {
         );
 
         assertTrue(error.getMessage().contains("2 entries"));
-        assertTrue(error.getMessage().contains("pairs.json"));
-        assertTrue(error.getMessage().contains("r13.md"));
+        assertTrue(error.getMessage().contains(" M experiments/holdout/dataset/pairs.json"));
+        assertTrue(error.getMessage().contains("?? experiments/holdout/dataset/resumes/r13.md"));
+    }
+
+    @Test
+    void datasetFilesCoversPairsJsonAndEveryReferencedDocument() throws Exception {
+        Path dataset = tempDir.resolve("dataset");
+        JsonNode parsed = new ObjectMapper().readTree(
+                "{\"holdoutVersion\":\"v1\","
+                        + "\"resumes\":[{\"id\":\"r1\",\"file\":\"resumes/r1.md\"}],"
+                        + "\"jobs\":[{\"id\":\"j1\",\"file\":\"jobs/j1.md\"},"
+                        + "{\"id\":\"j2\",\"file\":\"jobs/j2.md\"}]}"
+        );
+
+        List<Path> files = HoldoutRunnerSupport.datasetFiles(dataset, parsed);
+
+        assertEquals(4, files.size());
+        assertTrue(files.contains(dataset.resolve("pairs.json")));
+        assertTrue(files.contains(dataset.resolve("resumes/r1.md")));
+        assertTrue(files.contains(dataset.resolve("jobs/j1.md")));
+        assertTrue(files.contains(dataset.resolve("jobs/j2.md")));
+    }
+
+    @Test
+    void datasetFilesToleratesMissingResumeAndJobArrays() throws Exception {
+        Path dataset = tempDir.resolve("dataset");
+        JsonNode parsed = new ObjectMapper().readTree("{\"holdoutVersion\":\"v1\"}");
+
+        List<Path> files = HoldoutRunnerSupport.datasetFiles(dataset, parsed);
+
+        assertEquals(List.of(dataset.resolve("pairs.json")), files);
+    }
+
+    @Test
+    void untrackedDatasetIsRejectedEvenWhenGitStatusIsSilent() {
+        List<Path> files = List.of(tempDir.resolve("data").resolve("holdout").resolve("pairs.json"));
+
+        HoldoutRunnerSupport.assertAllTracked(0, "", files);
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> HoldoutRunnerSupport.assertAllTracked(
+                        1,
+                        "error: pathspec 'data/holdout/pairs.json' did not match any file(s) known to git",
+                        files
+                )
+        );
+        assertTrue(error.getMessage().contains("not tracked by git"));
+        assertTrue(error.getMessage().contains("data/holdout/pairs.json"));
     }
 
     @Test
@@ -237,23 +286,25 @@ class HoldoutRunnerSupportTests {
     }
 
     private static final class RecordingGuard implements HoldoutRunnerSupport.FreezeGuard {
-        private final List<Path[]> invocations = new ArrayList<>();
+        private final List<Path> repoRoots = new ArrayList<>();
+        private final List<Path> datasetDirs = new ArrayList<>();
+        private final List<JsonNode> datasets = new ArrayList<>();
 
         @Override
-        public void check(Path repoRoot, Path datasetDir) {
-            invocations.add(new Path[] {repoRoot, datasetDir});
+        public void check(Path repoRoot, Path datasetDir, JsonNode dataset) {
+            repoRoots.add(repoRoot);
+            datasetDirs.add(datasetDir);
+            datasets.add(dataset);
         }
     }
 
     private static String runLogWithV1() {
-        return """
-                # holdout 运行登记
-
-                ## v1
-
-                | # | 日期 | 被测 commit | 参数（chunk/overlap、Top-K、minSimilarity） | 结果文件 | 性质 | 备注 |
-                |---|------|-------------|------------------------------------------|---------|------|------|
-                | — | —    | —           | —                                        | —       | —    | 尚未运行 |
-                """;
+        return "# holdout 运行登记\n"
+                + "\n"
+                + "## v1\n"
+                + "\n"
+                + "| # | 日期 | 被测 commit | 参数（chunk/overlap、Top-K、minSimilarity） | 结果文件 | 性质 | 备注 |\n"
+                + "|---|------|-------------|------------------------------------------|---------|------|------|\n"
+                + "| — | —    | —           | —                                        | —       | —    | 尚未运行 |\n";
     }
 }
