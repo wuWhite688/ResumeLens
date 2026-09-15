@@ -28,6 +28,13 @@ final class HoldoutRunnerSupport {
     private static final int DIRTY_PREVIEW_LIMIT = 10;
 
     /**
+     * RUN-LOG.md is committed with LF endings, so the runner writes LF regardless of the platform
+     * it runs on. Using {@code System.lineSeparator()} here would rewrite every line of the file on
+     * Windows and bury the one appended row in a whole-file diff.
+     */
+    private static final String RUN_LOG_NEWLINE = "\n";
+
+    /**
      * Checks that must hold before a formal holdout run consumes its single reporting slot.
      * Injectable so the support tests can exercise {@link #planRun} against temporary
      * directories that are not git worktrees.
@@ -336,7 +343,7 @@ final class HoldoutRunnerSupport {
                 escapeCell(note)
         );
         lines.add(sectionEnd, row);
-        writeAtomically(runLog, String.join(System.lineSeparator(), lines) + System.lineSeparator());
+        writeAtomically(runLog, String.join(RUN_LOG_NEWLINE, lines) + RUN_LOG_NEWLINE);
         return ordinal;
     }
 
