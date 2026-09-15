@@ -19,11 +19,27 @@ import java.util.Locale;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 final class HoldoutRunnerSupport {
     static final String SEEN_DOMAIN = "seen_domain";
     static final String NEW_DOMAIN = "new_domain";
     private static final Pattern VERSION = Pattern.compile("v[1-9][0-9]*");
+    private static final int DIRTY_PREVIEW_LIMIT = 10;
+
+    /**
+     * Checks that must hold before a formal holdout run consumes its single reporting slot.
+     * Injectable so the support tests can exercise {@link #planRun} against temporary
+     * directories that are not git worktrees.
+     */
+    @FunctionalInterface
+    interface FreezeGuard {
+        void check(Path repoRoot, Path datasetDir) throws IOException;
+    }
+
+    static final FreezeGuard DEFAULT_FREEZE_GUARD = HoldoutRunnerSupport::enforceFreeze;
+    static final FreezeGuard NO_FREEZE_GUARD = (repoRoot, datasetDir) -> {
+    };
 
     private HoldoutRunnerSupport() {
     }
@@ -71,6 +87,16 @@ final class HoldoutRunnerSupport {
     }
 
     static RunPlan planRun(Path datasetDir, Path holdoutRoot, Path runLog, ObjectMapper mapper) throws IOException {
+        return planRun(datasetDir, holdoutRoot, runLog, mapper, DEFAULT_FREEZE_GUARD);
+    }
+
+    static RunPlan planRun(
+            Path datasetDir,
+            Path holdoutRoot,
+            Path runLog,
+            ObjectMapper mapper,
+            FreezeGuard freezeGuard
+    ) throws IOException {
         Path pairs = datasetDir.resolve("pairs.json");
         if (!Files.isRegularFile(pairs)) {
             throw new IllegalStateException("missing dataset: " + pairs.toAbsolutePath());
@@ -89,7 +115,75 @@ final class HoldoutRunnerSupport {
             throw new IllegalStateException("holdoutVersion must match v1, v2, ...; got " + version);
         }
         requireVersionSection(runLog, version);
+        freezeGuard.check(repoRootOf(holdoutRoot), datasetDir);
         return new RunPlan(true, version, holdoutRoot);
+    }
+
+    /**
+     * {@code holdoutRoot} is always {@code <repo>/experiments/holdout} for a real run.
+     */
+    static Path repoRootOf(Path holdoutRoot) {
+        Path experiments = holdoutRoot.toAbsolutePath().normalize().getParent();
+        Path repoRoot = experiments == null ? null : experiments.getParent();
+        if (repoRoot == null) {
+            throw new IllegalStateException("cannot derive repository root from holdout root " + holdoutRoot);
+        }
+        return repoRoot;
+    }
+
+    private static void enforceFreeze(Path repoRoot, Path datasetDir) throws IOException {
+        requireDatasetInsideRepo(repoRoot, datasetDir);
+        requireCleanWorktree(repoRoot);
+    }
+
+    static void requireDatasetInsideRepo(Path repoRoot, Path datasetDir) {
+        Path root = repoRoot.toAbsolutePath().normalize();
+        Path dataset = datasetDir.toAbsolutePath().normalize();
+        if (!dataset.startsWith(root)) {
+            throw new IllegalStateException(
+                    "a formal holdout dataset must live inside the repository so the recorded commit SHA covers it; "
+                            + "got " + dataset + " outside " + root
+            );
+        }
+    }
+
+    static void requireCleanWorktree(Path repoRoot) throws IOException {
+        Process process = new ProcessBuilder("git", "-C", repoRoot.toString(), "status", "--porcelain")
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int exit;
+        try {
+            exit = process.waitFor();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while checking worktree cleanliness", ex);
+        }
+        if (exit != 0) {
+            throw new IllegalStateException(
+                    "cannot determine worktree cleanliness (git status exited " + exit + "): " + output.trim()
+            );
+        }
+        assertCleanWorktree(output);
+    }
+
+    static void assertCleanWorktree(String porcelainOutput) {
+        List<String> dirty = porcelainOutput.lines()
+                .map(String::strip)
+                .filter(line -> !line.isEmpty())
+                .toList();
+        if (dirty.isEmpty()) {
+            return;
+        }
+        String preview = dirty.stream()
+                .limit(DIRTY_PREVIEW_LIMIT)
+                .collect(Collectors.joining("; "));
+        throw new IllegalStateException(
+                "refusing a formal holdout run with a dirty worktree (" + dirty.size() + " entries): "
+                        + preview + (dirty.size() > DIRTY_PREVIEW_LIMIT ? "; …" : "")
+                        + ". Commit or stash first so the commit SHA written to RUN-LOG.md describes "
+                        + "exactly what was tested."
+        );
     }
 
     static void requireVersionSection(Path runLog, String version) throws IOException {
