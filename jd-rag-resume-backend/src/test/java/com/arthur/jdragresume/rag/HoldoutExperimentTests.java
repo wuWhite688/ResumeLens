@@ -47,6 +47,7 @@ class HoldoutExperimentTests {
             HoldoutRunnerSupport.NEW_DOMAIN
     );
     private static final List<String> STRATEGIES = List.of("full_text", "rag");
+    private static final long MIN_LOCAL_ONNX_MODEL_BYTES = 100_000_000L;
 
     private static final List<String> PAIR_COLUMNS = List.of(
             "strategy", "pairId", "type", "domainRelation", "shouldMatch", "resumeId", "jobId",
@@ -761,7 +762,7 @@ class HoldoutExperimentTests {
         }
         log("local tokenizer bytes=" + tokenizer.toFile().length(), log);
         log("local model bytes=" + model.toFile().length(), log);
-        if (model.toFile().length() < 100_000_000L) {
+        if (model.toFile().length() < MIN_LOCAL_ONNX_MODEL_BYTES) {
             throw new IllegalStateException(
                     "ONNX model file looks truncated: " + model + " bytes=" + model.toFile().length()
             );

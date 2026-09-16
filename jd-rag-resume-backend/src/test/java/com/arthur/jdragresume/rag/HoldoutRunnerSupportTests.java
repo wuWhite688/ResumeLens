@@ -100,6 +100,7 @@ class HoldoutRunnerSupportTests {
         assertTrue(updated.contains("| 待判定 |"));
         assertTrue(updated.contains("test run"));
         assertFalse(updated.contains("| — | — |"));
+        assertFalse(updated.contains("\r\n"));
     }
 
     @Test
