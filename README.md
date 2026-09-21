@@ -430,8 +430,8 @@ node --experimental-strip-types --test tests/report-export.test.ts
 - `GET /matches` 不写库；`SEMANTIC_EMBEDDING_FAILED` 与 `RAG_EMBEDDING_FAILED` 一样返回 503
 - 精析 Top N 的选取在前端；后端配额仍然限制并发分析次数
 - **匹配分的含义**：匹配分是基于简历证据与岗位要求的辅助评估（综合检索证据、模型评分、硬技能规则与服务端分数上限），不代表录用概率或面试回复率
-- **领域迁移**：阈值 0.72 在已见领域的 dev 集上校准；holdout v1 中 `new_domain` 块精度 0.545、块 F1 0.706，低于 `seen_domain`，说明迁移到新领域时证据筛选偏松（见 [holdout 结果](experiments/holdout/RESULTS.md)）。按领域重新校准需要全新的独立测试集，不能复用已正式报数的 v1
-- **数据流向**：默认配置下，简历文本会随分析请求发送给所配置的模型服务（如 DeepSeek）；LLM 走 OpenAI 兼容接口，支持接入本地部署的兼容模型，以减少对第三方模型服务的数据发送
+- **领域迁移**：阈值 0.72 在已见领域的 dev 集上校准；holdout v1 中 `new_domain` 块精度 0.545、块 F1 0.706，低于 `seen_domain`，说明迁移到新领域时证据筛选偏松（见 [holdout 结果](experiments/holdout/RESULTS.md)）。v1 仍可用于回归对比，但若据其结果调参，就不能再把它当作未见过的独立测试集来证明泛化能力，需另建全新测试集
+- **数据流向**：关闭 mock、启用真实模型分析时，用于分析的简历内容会发送给所配置的模型服务（如 DeepSeek）；LLM 走 OpenAI 兼容接口，支持接入本地部署的兼容模型，以减少对第三方模型服务的数据发送
 
 这些不影响主链路演示；公开部署前仍应继续做密钥外置与运行环境加固。
 
