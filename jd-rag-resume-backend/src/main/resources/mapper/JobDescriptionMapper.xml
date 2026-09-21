@@ -15,8 +15,9 @@
         <if test="location != null and location != ''">
             AND location = #{location}
         </if>
-        ORDER BY created_at DESC
-        LIMIT #{offset}, #{size}
+        <!-- id 作为第二排序键：created_at 相同的记录顺序固定，翻页时不会重复或漏掉 -->
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{size} OFFSET #{offset}
     </select>
 
 </mapper>
