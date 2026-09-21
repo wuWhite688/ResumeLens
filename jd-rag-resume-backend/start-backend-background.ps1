@@ -141,7 +141,7 @@ if ([string]::IsNullOrWhiteSpace($env:AI_BASE_URL)) {
     $env:AI_BASE_URL = 'https://api.deepseek.com'
 }
 if ([string]::IsNullOrWhiteSpace($env:AI_MODEL)) {
-    $env:AI_MODEL = 'deepseek-v4-flash'
+    $env:AI_MODEL = 'deepseek-flash'
 }
 if ([string]::IsNullOrWhiteSpace($env:AI_MOCK_ENABLED)) {
     $env:AI_MOCK_ENABLED = 'false'

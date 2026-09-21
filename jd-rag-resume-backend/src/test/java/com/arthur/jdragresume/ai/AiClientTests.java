@@ -40,7 +40,7 @@ class AiClientTests {
 
         assertEquals("ok", client.chat("system", "user"));
         JsonNode body = objectMapper.readTree(requestBody.get());
-        assertEquals("deepseek-v4-flash", body.path("model").asText());
+        assertEquals("deepseek-flash", body.path("model").asText());
         assertEquals("disabled", body.path("thinking").path("type").asText());
         assertEquals("json_object", body.path("response_format").path("type").asText());
         assertFalse(body.path("messages").isEmpty());
@@ -62,7 +62,7 @@ class AiClientTests {
         AiProperties properties = new AiProperties();
         properties.setApiKey("test-key");
         properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
-        properties.setModel("deepseek-v4-flash");
+        properties.setModel("deepseek-flash");
         properties.setTimeoutSeconds(5);
         properties.setMockEnabled(false);
         return properties;
