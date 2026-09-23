@@ -24,6 +24,13 @@ public class JobQueryService {
      */
     static final long MAX_OFFSET = 10_000L;
 
+    /**
+     * LIKE 的转义字符，必须与 JobDescriptionMapper.xml 里的 {@code ESCAPE '!'} 保持一致。
+     * <p>
+     * 不用反斜杠：MySQL 开启 NO_BACKSLASH_ESCAPES 时 {@code '\\'} 的含义会变，'!' 不受 sql_mode 影响。
+     */
+    static final char LIKE_ESCAPE = '!';
+
     private final JobDescriptionMapper jobDescriptionMapper;
     private final CurrentUserService currentUserService;
 
@@ -36,7 +43,40 @@ public class JobQueryService {
     public List<JobListItem> search(String keyword, String location, int page, int size) {
         long offset = toOffset(page, size);
         AppUser user = currentUserService.getCurrentUser();
-        return jobDescriptionMapper.searchJobs(user.getId(), keyword, location, offset, size);
+        return jobDescriptionMapper.searchJobs(
+                user.getId(), escapeLikeKeyword(keyword), normalizeLocation(location), offset, size);
+    }
+
+    /**
+     * 用户输入的关键字按字面匹配：先 trim，空白视为不过滤；再把 LIKE 通配符 % 和 _
+     * 以及转义字符本身转义掉。否则搜 "%" 会返回全部岗位，搜 "C_" 会匹配到 "CA"。
+     */
+    static String escapeLikeKeyword(String keyword) {
+        if (keyword == null) {
+            return null;
+        }
+        String trimmed = keyword.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        StringBuilder escaped = new StringBuilder(trimmed.length() + 8);
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c == LIKE_ESCAPE || c == '%' || c == '_') {
+                escaped.append(LIKE_ESCAPE);
+            }
+            escaped.append(c);
+        }
+        return escaped.toString();
+    }
+
+    /** location 是等值匹配，不涉及通配符，只做 trim；空白视为不过滤。 */
+    static String normalizeLocation(String location) {
+        if (location == null) {
+            return null;
+        }
+        String trimmed = location.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     static long toOffset(int page, int size) {

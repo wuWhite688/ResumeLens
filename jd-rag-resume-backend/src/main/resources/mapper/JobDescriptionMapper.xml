@@ -8,9 +8,10 @@
         SELECT id, title, company_name, location, employment_type, created_at
         FROM job_description
         WHERE user_id = #{userId}
+        <!-- keyword 已由 JobQueryService.escapeLikeKeyword 转义，ESCAPE 字符须与 LIKE_ESCAPE 一致 -->
         <if test="keyword != null and keyword != ''">
-            AND (title LIKE CONCAT('%', #{keyword}, '%')
-            OR company_name LIKE CONCAT('%', #{keyword}, '%'))
+            AND (title LIKE CONCAT('%', #{keyword}, '%') ESCAPE '!'
+            OR company_name LIKE CONCAT('%', #{keyword}, '%') ESCAPE '!')
         </if>
         <if test="location != null and location != ''">
             AND location = #{location}

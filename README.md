@@ -272,7 +272,7 @@ $env:JWT_SECRET = "replace-with-at-least-32-byte-random-secret"
 # 可选：真实 LLM
 $env:AI_API_KEY = "sk-..."
 $env:AI_BASE_URL = "https://api.deepseek.com"
-$env:AI_MODEL = "deepseek-chat"
+$env:AI_MODEL = "deepseek-flash"
 
 # 或 mock
 $env:AI_MOCK_ENABLED = "true"
