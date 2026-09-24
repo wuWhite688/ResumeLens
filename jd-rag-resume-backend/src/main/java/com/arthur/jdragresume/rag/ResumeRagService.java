@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.HexFormat;
@@ -353,7 +354,9 @@ public class ResumeRagService {
         skills.put("Elasticsearch", List.of("elasticsearch", "elastic search", "es"));
         skills.put("RAG", List.of("rag", "retrieval augmented generation", "检索增强生成"));
         skills.put("LLM", List.of("llm", "大语言模型"));
-        return Map.copyOf(skills);
+        // 不能用 Map.copyOf：它的迭代顺序随 JVM 启动的随机种子变化，而这个顺序决定了
+        // prompt 与「规则校验缺失」文案里技能的排列，同样的输入必须得到同样的 prompt。
+        return Collections.unmodifiableMap(skills);
     }
 
     private double applyBoost(double rawSimilarity, int hitCount) {
