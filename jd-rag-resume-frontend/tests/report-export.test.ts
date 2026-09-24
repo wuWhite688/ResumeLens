@@ -39,6 +39,19 @@ test("asList parses JSON arrays and plain text", () => {
   assert.deepEqual(asList("x；y"), ["x", "y"]);
 });
 
+test("asList strips list markers but keeps numbers that belong to the content", () => {
+  // 模型返回的是自由文本，简历里最有分量的恰恰是开头的量化数字，不能被当成序号削掉。
+  assert.deepEqual(
+    asList("5 年 Java 后端经验\n5000 QPS 峰值\n1.8s 慢查询优化到 40ms\n99.9% 可用性"),
+    ["5 年 Java 后端经验", "5000 QPS 峰值", "1.8s 慢查询优化到 40ms", "99.9% 可用性"],
+  );
+  assert.deepEqual(
+    asList("1. 熟悉 Redis\n2) Kafka\n3、Docker\n- Git\n• Linux\n* Vue\n10.Elasticsearch"),
+    ["熟悉 Redis", "Kafka", "Docker", "Git", "Linux", "Vue", "Elasticsearch"],
+  );
+  assert.deepEqual(asList("- 1. 熟悉 Redis"), ["熟悉 Redis"]);
+});
+
 test("parseRagMeta and evidenceChunks read retrieval payload", () => {
   const meta = parseRagMeta(sampleContext);
   assert.ok(meta);

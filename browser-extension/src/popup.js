@@ -3,6 +3,7 @@
 
   const RESUMELENS_MATCHES = ["http://localhost:3000/*", "http://127.0.0.1:3000/*"];
   const requestGate = globalThis.ResumeLensPopupRequestGate.create();
+  const { asList } = globalThis.ResumeLensReportList;
   const state = {
     job: null,
     existingJob: null,
@@ -314,17 +315,6 @@
     }
     block.append(heading, list);
     container.append(block);
-  }
-
-  function asList(raw) {
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
-    } catch {
-      // Plain text and newline-delimited model output are both supported.
-    }
-    return String(raw).split(/\r?\n|[；;]/).map((item) => item.replace(/^[-*•\d.、\s]+/, "").trim()).filter(Boolean);
   }
 
   function statusLabel(value) {
