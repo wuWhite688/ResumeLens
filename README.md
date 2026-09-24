@@ -50,6 +50,7 @@
 ## 功能一览
 
 - **账号**：注册 / 登录、BCrypt 密码、JWT 无状态鉴权、按用户隔离数据；登录/注册有基础频率限制
+- **CSRF**：业务接口走 Bearer 头，浏览器不会自动携带；只有 register/login/refresh/logout 靠 refresh cookie。`SameSite=Lax` 按「站点」判断，兄弟子域（same-site 但不同源）的 POST 仍会带上 cookie，所以另加 Fetch Metadata 校验：BFF 对所有写请求只放行 `Sec-Fetch-Site: same-origin`/`none`（无该头时比对 `Origin` 的 host），后端在这四个接口上再拦一次 `same-site`/`cross-site`，且在消耗限流额度之前
 - **简历**：文本创建或文件上传（每用户最多 30 份、已存文件合计 200MB）、列表检索、编辑、删除（含上传文件与 Lucene 向量清理）
 - **职位 JD**：创建、编辑、删除、**JSON 批量导入**（前端入口 + `POST /api/job-descriptions/import`，每用户最多 200 条）
 - **BOSS 浏览器扩展**：点击后以 `activeTab` 临时读取当前 JD、允许提交前校正、选择已存简历并在扩展内查看分析；优先按稳定岗位 ID 查重，缺失时使用完整岗位内容指纹（见 [`browser-extension/`](browser-extension/)）
