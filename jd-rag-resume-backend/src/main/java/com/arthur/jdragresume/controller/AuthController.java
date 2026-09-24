@@ -6,6 +6,7 @@ import com.arthur.jdragresume.dto.auth.LoginRequest;
 import com.arthur.jdragresume.dto.auth.RegisterRequest;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.security.CookieSecurity;
+import com.arthur.jdragresume.security.FetchMetadataGuard;
 import com.arthur.jdragresume.security.JwtProperties;
 import com.arthur.jdragresume.security.SlidingWindowRateLimiter;
 import com.arthur.jdragresume.service.AuthService;
@@ -19,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -60,8 +62,10 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<AuthResponse>> register(
             @Valid @RequestBody RegisterRequest request,
+            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
             HttpServletRequest httpRequest
     ) {
+        FetchMetadataGuard.requireSameOrigin(fetchSite);
         acquire("register:" + clientKey(httpRequest), registerMaxPerWindow, registerWindowMs);
         return sessionResponse(authService.register(request), HttpStatus.CREATED, httpRequest);
     }
@@ -69,8 +73,10 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<AuthResponse>> login(
             @Valid @RequestBody LoginRequest request,
+            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
             HttpServletRequest httpRequest
     ) {
+        FetchMetadataGuard.requireSameOrigin(fetchSite);
         acquire(
                 "login:" + clientKey(httpRequest) + ":" + request.username().trim().toLowerCase(Locale.ROOT),
                 loginMaxPerWindow,
@@ -82,16 +88,20 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<AuthResponse>> refresh(
             @CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken,
+            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
             HttpServletRequest httpRequest
     ) {
+        FetchMetadataGuard.requireSameOrigin(fetchSite);
         return sessionResponse(authService.refresh(refreshToken), HttpStatus.OK, httpRequest);
     }
 
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(
             @CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken,
+            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
             HttpServletRequest httpRequest
     ) {
+        FetchMetadataGuard.requireSameOrigin(fetchSite);
         authService.logout(refreshToken);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, clearRefreshCookie(httpRequest).toString())
