@@ -36,6 +36,7 @@ public class AuthController {
     private final AuthService authService;
     private final JwtProperties jwtProperties;
     private final SlidingWindowRateLimiter rateLimiter;
+    private final FetchMetadataGuard fetchMetadataGuard;
     private final int loginMaxPerWindow;
     private final long loginWindowMs;
     private final int registerMaxPerWindow;
@@ -45,6 +46,7 @@ public class AuthController {
             AuthService authService,
             JwtProperties jwtProperties,
             SlidingWindowRateLimiter rateLimiter,
+            FetchMetadataGuard fetchMetadataGuard,
             @Value("${app.auth.login-max-per-window:20}") int loginMaxPerWindow,
             @Value("${app.auth.login-window-minutes:15}") long loginWindowMinutes,
             @Value("${app.auth.register-max-per-window:8}") int registerMaxPerWindow,
@@ -53,6 +55,7 @@ public class AuthController {
         this.authService = authService;
         this.jwtProperties = jwtProperties;
         this.rateLimiter = rateLimiter;
+        this.fetchMetadataGuard = fetchMetadataGuard;
         this.loginMaxPerWindow = Math.max(1, loginMaxPerWindow);
         this.loginWindowMs = Math.max(1L, loginWindowMinutes) * 60_000L;
         this.registerMaxPerWindow = Math.max(1, registerMaxPerWindow);
@@ -62,10 +65,11 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<AuthResponse>> register(
             @Valid @RequestBody RegisterRequest request,
-            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.SITE_HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.ORIGIN_HEADER, required = false) String origin,
             HttpServletRequest httpRequest
     ) {
-        FetchMetadataGuard.requireSameOrigin(fetchSite);
+        fetchMetadataGuard.requireSameOrigin(fetchSite, origin);
         acquire("register:" + clientKey(httpRequest), registerMaxPerWindow, registerWindowMs);
         return sessionResponse(authService.register(request), HttpStatus.CREATED, httpRequest);
     }
@@ -73,10 +77,11 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<AuthResponse>> login(
             @Valid @RequestBody LoginRequest request,
-            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.SITE_HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.ORIGIN_HEADER, required = false) String origin,
             HttpServletRequest httpRequest
     ) {
-        FetchMetadataGuard.requireSameOrigin(fetchSite);
+        fetchMetadataGuard.requireSameOrigin(fetchSite, origin);
         acquire(
                 "login:" + clientKey(httpRequest) + ":" + request.username().trim().toLowerCase(Locale.ROOT),
                 loginMaxPerWindow,
@@ -88,20 +93,22 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<AuthResponse>> refresh(
             @CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken,
-            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.SITE_HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.ORIGIN_HEADER, required = false) String origin,
             HttpServletRequest httpRequest
     ) {
-        FetchMetadataGuard.requireSameOrigin(fetchSite);
+        fetchMetadataGuard.requireSameOrigin(fetchSite, origin);
         return sessionResponse(authService.refresh(refreshToken), HttpStatus.OK, httpRequest);
     }
 
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(
             @CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken,
-            @RequestHeader(name = FetchMetadataGuard.HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.SITE_HEADER, required = false) String fetchSite,
+            @RequestHeader(name = FetchMetadataGuard.ORIGIN_HEADER, required = false) String origin,
             HttpServletRequest httpRequest
     ) {
-        FetchMetadataGuard.requireSameOrigin(fetchSite);
+        fetchMetadataGuard.requireSameOrigin(fetchSite, origin);
         authService.logout(refreshToken);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, clearRefreshCookie(httpRequest).toString())

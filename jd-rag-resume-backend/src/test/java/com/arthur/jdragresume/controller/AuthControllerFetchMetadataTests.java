@@ -4,6 +4,7 @@ import com.arthur.jdragresume.dto.auth.LoginRequest;
 import com.arthur.jdragresume.dto.auth.RegisterRequest;
 import com.arthur.jdragresume.exception.BusinessException;
 import com.arthur.jdragresume.exception.GlobalExceptionHandler;
+import com.arthur.jdragresume.security.FetchMetadataGuard;
 import com.arthur.jdragresume.security.JwtProperties;
 import com.arthur.jdragresume.security.SlidingWindowRateLimiter;
 import com.arthur.jdragresume.service.AuthService;
@@ -50,7 +51,8 @@ class AuthControllerFetchMetadataTests {
         authService = new RecordingAuthService();
         rateLimiter = new RecordingRateLimiter();
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AuthController(authService, new JwtProperties(), rateLimiter, 20, 15, 8, 30))
+                .standaloneSetup(new AuthController(authService, new JwtProperties(), rateLimiter,
+                        new FetchMetadataGuard(List.of("http://localhost:3000")), 20, 15, 8, 30))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
