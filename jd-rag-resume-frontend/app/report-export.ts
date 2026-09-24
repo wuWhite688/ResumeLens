@@ -46,7 +46,9 @@ export function asList(value?: string): string[] {
   }
   return value
     .split(/\r?\n|[；;]/)
-    .map((item) => item.replace(/^[-•\d.)\s]+/, "").trim())
+    // 只去列表标记：项目符号（- * •），以及「数字 + . ) 、」构成的序号。序号后不能紧跟数字，
+    // 否则 "1.8s 慢查询" 会被当成序号 "1." 削成 "8s 慢查询"；裸数字开头（"5 年经验"）是正文。
+    .map((item) => item.replace(/^\s*(?:[-*•]\s*)?(?:\d+[.)、](?!\d)\s*)?/, "").trim())
     .filter(Boolean);
 }
 

@@ -46,8 +46,8 @@ test("asList strips list markers but keeps numbers that belong to the content", 
     ["5 年 Java 后端经验", "5000 QPS 峰值", "1.8s 慢查询优化到 40ms", "99.9% 可用性"],
   );
   assert.deepEqual(
-    asList("1. 熟悉 Redis\n2) Kafka\n3、Docker\n- Git\n• Linux\n10.Elasticsearch"),
-    ["熟悉 Redis", "Kafka", "Docker", "Git", "Linux", "Elasticsearch"],
+    asList("1. 熟悉 Redis\n2) Kafka\n3、Docker\n- Git\n• Linux\n* Vue\n10.Elasticsearch"),
+    ["熟悉 Redis", "Kafka", "Docker", "Git", "Linux", "Vue", "Elasticsearch"],
   );
   assert.deepEqual(asList("- 1. 熟悉 Redis"), ["熟悉 Redis"]);
 });
