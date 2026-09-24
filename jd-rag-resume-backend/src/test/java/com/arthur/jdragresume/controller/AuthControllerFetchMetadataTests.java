@@ -89,6 +89,34 @@ class AuthControllerFetchMetadataTests {
                 authService.calls);
     }
 
+    // 旧浏览器不发 Sec-Fetch-Site，但跨源 POST 一定带 Origin。缺头不能等于放行。
+    @ParameterizedTest
+    @CsvSource({
+            "https://evil.example.com",
+            "null",
+            // 与可信来源 http://localhost:3000 只差协议 / 只差端口，都不是同源
+            "https://localhost:3000",
+            "http://localhost:8081",
+    })
+    void untrustedOriginWithoutFetchMetadataIsRejectedBeforeAnySideEffect(String origin) throws Exception {
+        mockMvc.perform(request("/api/auth/logout").header("Origin", origin))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CROSS_SITE_REQUEST_BLOCKED"));
+        mockMvc.perform(request("/api/auth/login").header("Origin", origin))
+                .andExpect(status().isForbidden());
+
+        assertEquals(List.of(), authService.calls, "auth service must not be reached");
+        assertEquals(List.of(), rateLimiter.keys, "rate-limit budget must not be spent");
+    }
+
+    @Test
+    void trustedOriginWithoutFetchMetadataStillReachesTheService() throws Exception {
+        mockMvc.perform(request("/api/auth/logout").header("Origin", "http://localhost:3000"))
+                .andExpect(status().isOk());
+
+        assertEquals(List.of("logout:victim-refresh"), authService.calls);
+    }
+
     private static MockHttpServletRequestBuilder request(String path) {
         MockHttpServletRequestBuilder builder = post(path).cookie(new Cookie("jd-rag-refresh", "victim-refresh"));
         if (path.endsWith("/login")) {
