@@ -94,6 +94,37 @@ class ResumeRagServiceTests {
     }
 
     @Test
+    void reportsSkillsInDictionaryOrderRegardlessOfJvmHashSeed() {
+        // 这些列表会原样写进 LLM prompt 和「规则校验缺失」文案。Map.copyOf 的迭代顺序
+        // 随每次 JVM 启动的随机种子变化，同样的输入换一次进程就得到不同的 prompt。
+        // 8 个技能在 JD 里故意打乱写；若顺序随机，偶然通过的概率只有 1/8!。
+        ResumeRagService service = new ResumeRagService(null, null, null, new RagProperties(), null, null, null);
+        JobDescription jd = new JobDescription();
+        jd.setTitle("后端工程师");
+        jd.setDescription("LLM、Git、Redis、Java、Docker、Python、MySQL、Kafka");
+        jd.setRequirements("");
+        List<RetrievedChunk> evidence = List.of(new RetrievedChunk(
+                0,
+                "熟悉 Kafka、Java、Git、MySQL",
+                0.8,
+                0.8,
+                true,
+                "kept",
+                "技能",
+                List.of()
+        ));
+
+        HardSkillCoverage coverage = service.assessHardSkills(jd, evidence);
+
+        assertEquals(
+                List.of("Java", "MySQL", "Redis", "Kafka", "Docker", "Python", "Git", "LLM"),
+                coverage.required()
+        );
+        assertEquals(List.of("Java", "MySQL", "Kafka", "Git"), coverage.matched());
+        assertEquals(List.of("Redis", "Docker", "Python", "LLM"), coverage.missing());
+    }
+
+    @Test
     void doesNotMatchSkillNameInsideLongerAsciiWord() {
         ResumeRagService service = new ResumeRagService(null, null, null, new RagProperties(), null, null, null);
         JobDescription jd = new JobDescription();
