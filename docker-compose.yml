@@ -27,6 +27,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in compose.env}
       # false keeps http://127.0.0.1:3000 login working. Set true for HTTPS.
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+      # CSRF Origin fallback. Same default as application.properties: an empty value
+      # would override Spring's default with an empty list and block local logins.
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       AI_MOCK_ENABLED: ${AI_MOCK_ENABLED:-true}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
@@ -54,6 +57,8 @@ services:
       BACKEND_API_URL: http://backend:8080
       HOST: 0.0.0.0
       PORT: 3000
+      # Must match the backend's list (see backend.environment.TRUSTED_ORIGINS).
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
